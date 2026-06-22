@@ -1,0 +1,138 @@
+CHUNK_ID: C003
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f03 (com.acme.insurance.claims.entity.ClaimRecord)
+
+LAYER: Entity
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.acme.insurance.claims.entity;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
+import jakarta.persistence.Id;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Version;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.FetchType;
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+
+/**
+ * Represents the core business entity for an insurance claim.
+ * Maps to the CLM_RECORD table in the primary transactional database.
+ */
+@Entity
+@Table(name = "CLM_RECORD")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class ClaimRecord {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    @Column(name = "CLAIM_ID", updatable = false, nullable = false, length = 36)
+    private String claimId;
+
+    @Column(name = "POLICY_NUMBER", nullable = false, length = 15)
+    private String policyNumber;
+
+    @Column(name = "REPORTER_ID", nullable = false, length = 50)
+    private String reporterId;
+
+    @Column(name = "INCIDENT_DATE", nullable = false)
+    private LocalDate incidentDate;
+
+    @Column(name = "CLAIM_AMOUNT", nullable = false, precision = 12, scale = 2)
+    private BigDecimal claimAmount;
+
+    @Column(name = "INCIDENT_DESC", length = 2000)
+    private String incidentDescription;
+
+    @Column(name = "IS_EXPEDITED", nullable = false)
+    private boolean isExpedited;
+
+    @Column(name = "CLAIM_STATUS", nullable = false, length = 30)
+    private String status;
+
+    @Column(name = "SOURCE_SYSTEM", nullable = false, length = 20)
+    private String sourceSystem;
+
+    @OneToMany(mappedBy = "claimRecord", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
+    @Builder.Default
+    private List<ClaimDocumentEntity> documents = new ArrayList<>();
+
+    @Version
+    @Column(name = "OPTLOCK_VERSION")
+    private Long version;
+
+    @Column(name = "CREATED_AT", updatable = false, nullable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "UPDATED_AT")
+    private LocalDateTime updatedAt;
+
+    /**
+     * Lifecycle hook executed before the entity is persisted to the database for the first time.
+     */
+    @PrePersist
+    protected void onCreate() {
+        this.createdAt = LocalDateTime.now();
+        this.updatedAt = this.createdAt;
+        if (this.status == null) {
+            this.status = "RECEIVED";
+        }
+    }
+
+    /**
+     * Lifecycle hook executed before the entity is updated in the database.
+     */
+    @PreUpdate
+    protected void onUpdate() {
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    /**
+     * Convenience method to associate a document with this claim securely.
+     * Ensures both sides of the bidirectional relationship are synchronized.
+     */
+    public void addDocument(ClaimDocumentEntity document) {
+        if (document != null) {
+            this.documents.add(document);
+            document.setClaimRecord(this);
+        }
+    }
+
+    /**
+     * Evaluates whether the claim is in a terminal state where no further modifications are allowed.
+     */
+    public boolean isTerminalState() {
+        if (this.status == null) {
+            return false;
+        }
+        return this.status.equals("APPROVED") || this.status.equals("DENIED") || this.status.equals("WITHDRAWN");
+    }
+}

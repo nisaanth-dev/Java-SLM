@@ -1,0 +1,83 @@
+business_functional_name: |
+Claim Status Response Format
+
+core_business_functionality: |
+Defines the structure for communicating claim outcomes back to external
+systems. Formats identifiers, processing statuses, and potential errors while
+omitting empty data points to reduce transmission overhead.
+
+business_function: 
+  - Formats the core claim identifier for output.
+  - Formats the current processing status for output.
+  - Lists identifiers of successfully attached documents.
+  - Formats system error descriptions for external consumption.
+  - Evaluates whether the claim is considered actively processing rather than errored or rejected.
+
+business_functions_list: 
+  - Format Identifier
+  - Format Status
+  - List Documents
+  - Format Error
+  - Evaluate Activeness
+
+business_rules: 
+  - rule_id: "C011_BR1"
+
+rule: "When returning a claim response, any data field that does not contain a value must be entirely omitted from the output message rather than displaying an empty placeholder."
+
+condition: "Response field is empty or null"
+
+action: "Exclude the field from the payload"
+
+occurrence: "C011_BR1"
+
+source_chunks: ["C011"]
+
+  - rule_id: "C011_BR2"
+
+rule: "A claim response is classified as representing an active claim unless its specific status is system error, invalid payload, or rejected."
+
+condition: "Claim status is not system error, invalid payload, or rejected"
+
+action: "Classify as active"
+
+occurrence: "C011_BR2"
+
+source_chunks: ["C011"]
+
+Imports
+This chunk imports Jackson annotations `@JsonInclude` and `@JsonProperty` to
+dictate how the Java object is serialized into JSON. It imports Lombok
+annotations `@Data`, `@NoArgsConstructor`, and `@AllArgsConstructor` to
+generate standard accessors and constructors. It imports the standard Java
+`List`.
+
+Class-Level Declarations
+The `ClaimResponse` class is annotated with `@Data` to generate getters,
+setters, and structural methods; `@NoArgsConstructor` and
+`@AllArgsConstructor` for constructors; and
+`@JsonInclude(JsonInclude.Include.NON_NULL)` which enforces a runtime rule
+that any field containing a null value will be excluded from the generated
+JSON payload.
+
+Fields
+The class declares the following fields:
+
+  - `claimId`: A `String` representing the unique record identifier. It is mapped to the JSON key "claim_id" via the `@JsonProperty` annotation.
+
+  - `claimStatus`: A `String` representing the current processing state. Mapped via `@JsonProperty("claim_status")`.
+
+  - `attachedDocumentIds`: A `List<String>` representing identifiers for files linked to this claim. Mapped via `@JsonProperty("attached_document_ids")`.
+
+  - `errorMessage`: A `String` representing a human-readable failure description. Mapped via `@JsonProperty("error_message")`.
+
+Methods
+The `isActive` method returns a `boolean`.
+
+An `if` statement checks whether `claimStatus` is `null`. If true, it returns
+`false` and terminates. If false, execution continues.
+
+The method returns the evaluated result of checking whether `claimStatus` is
+NOT equal to `"SYSTEM_ERROR"`, AND NOT equal to `"INVALID_PAYLOAD"`, AND NOT
+equal to `"REJECTED"`. If none of these three error states match, it returns
+`true`; otherwise, it returns `false`.

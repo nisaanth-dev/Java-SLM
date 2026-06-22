@@ -1,0 +1,113 @@
+CHUNK_ID: C002
+
+APPLICATION: Meridian Loan Origination Platform
+
+SERVICE: loan-origination-service
+
+FILE: f02 (com.meridianbank.loanorigination.service.LoanApplicationService)
+
+LAYER: Service
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.meridianbank.loanorigination.service;
+
+import com.meridianbank.loanorigination.dto.LoanApplicationRequest;
+import com.meridianbank.loanorigination.dto.LoanApplicationResponse;
+import com.meridianbank.loanorigination.dto.LoanDecisionResponse;
+import com.meridianbank.loanorigination.entity.LoanApplication;
+import com.meridianbank.loanorigination.entity.Applicant;
+import com.meridianbank.loanorigination.exception.LoanApplicationNotFoundException;
+import com.meridianbank.loanorigination.exception.CreditCheckUnavailableException;
+import com.meridianbank.loanorigination.mapper.LoanApplicationMapper;
+import com.meridianbank.loanorigination.repository.LoanApplicationRepository;
+import com.meridianbank.loanorigination.repository.ApplicantRepository;
+import com.meridianbank.loanorigination.event.LoanDecisionEventPublisher;
+import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClientException;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+public class LoanApplicationService {
+
+    private static final Logger logger = LoggerFactory.getLogger(LoanApplicationService.class);
+
+    private static final BigDecimal HIGH_VALUE_THRESHOLD = new BigDecimal("50000");
+    private static final int MINIMUM_ACCEPTABLE_CREDIT_SCORE = 620;
+
+    private final LoanApplicationRepository loanApplicationRepository;
+    private final ApplicantRepository applicantRepository;
+    private final LoanApplicationMapper loanApplicationMapper;
+    private final CreditBureauClient creditBureauClient;
+    private final LoanDecisionEventPublisher loanDecisionEventPublisher;
+
+    @Transactional
+    public LoanApplicationResponse createApplication(LoanApplicationRequest request) {
+        Applicant applicant = applicantRepository.findById(request.getApplicantId())
+                .orElseThrow(() -> new LoanApplicationNotFoundException("Applicant not found with id: " + request.getApplicantId()));
+
+        LoanApplication loanApplication = new LoanApplication();
+        loanApplication.setApplicant(applicant);
+        loanApplication.setRequestedAmount(request.getRequestedAmount());
+        loanApplication.setLoanPurpose(request.getLoanPurpose());
+        loanApplication.setTermInMonths(request.getTermInMonths());
+        loanApplication.setSubmittedAt(LocalDateTime.now());
+        loanApplication.setStatus("PENDING");
+
+        int creditScore;
+        try {
+            creditScore = creditBureauClient.fetchCreditScore(applicant.getNationalIdNumber());
+        } catch (RestClientException ex) {
+            logger.error("Credit bureau lookup failed for applicantId={}: {}", applicant.getId(), ex.getMessage());
+            throw new CreditCheckUnavailableException("Unable to retrieve credit score for applicant: " + applicant.getId());
+        }
+
+        loanApplication.setCreditScoreAtSubmission(creditScore);
+
+        if (creditScore < MINIMUM_ACCEPTABLE_CREDIT_SCORE) {
+            loanApplication.setStatus("REJECTED");
+            loanApplication.setRejectionReason("Credit score below minimum threshold of " + MINIMUM_ACCEPTABLE_CREDIT_SCORE);
+        } else if (request.getRequestedAmount().compareTo(HIGH_VALUE_THRESHOLD) > 0) {
+            loanApplication.setStatus("PENDING_MANUAL_REVIEW");
+        } else {
+            loanApplication.setStatus("PENDING");
+        }
+
+        LoanApplication savedApplication = loanApplicationRepository.save(loanApplication);
+
+        logger.info("Created loan application id={} with status={}", savedApplication.getId(), savedApplication.getStatus());
+
+        return loanApplicationMapper.toResponse(savedApplication);
+    }
+
+    public LoanApplicationResponse getApplicationById(Long applicationId) {
+        return loanApplicationRepository.findById(applicationId)
+                .map(loanApplicationMapper::toResponse)
+                .orElse(null);
+    }
+
+    public List<LoanApplicationResponse> findApplicationsByStatus(String status) {
+        List<LoanApplication> applications;
+
+        if (status == null || status.isBlank()) {
+            applications = loanApplicationRepository.findAll();
+        } else {
+            applications = loanApplicationRepository.findByStatusIgnoreCase(status.trim());
+        }
+
+        return applications.stream()
+                .map(loanApplicationMapper::toResponse)
+                .collect(Collectors.toList());
+    }
+}

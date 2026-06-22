@@ -1,0 +1,69 @@
+CHUNK_ID: C009
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f09 (com.acme.insurance.claims.scheduler.StaleClaimJob)
+
+LAYER: Scheduler
+
+ENTRY_POINT: yes
+
+=== CODE ===
+
+package com.acme.insurance.claims.scheduler;
+
+import com.acme.insurance.claims.entity.ClaimRecord;
+import com.acme.insurance.claims.repository.ClaimRepository;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.time.LocalDateTime;
+import java.util.List;
+
+/**
+ * Background job responsible for identifying claims that have stalled in processing.
+ */
+@Component
+public class StaleClaimJob {
+
+    private static final Logger log = LoggerFactory.getLogger(StaleClaimJob.class);
+    private final ClaimRepository claimRepository;
+
+    public StaleClaimJob(ClaimRepository claimRepository) {
+        this.claimRepository = claimRepository;
+    }
+
+    /**
+     * Executes every hour to sweep for claims stuck in PENDING_DOCUMENTS status.
+     */
+    @Scheduled(cron = "0 0 * * * *")
+    @Transactional
+    public void processStalePendingDocuments() {
+        log.info("Starting scheduled job: processStalePendingDocuments");
+
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(14);
+        List<ClaimRecord> staleClaims = claimRepository.findStaleClaimsByStatus("PENDING_DOCUMENTS", cutoff);
+
+        if (staleClaims == null || staleClaims.isEmpty()) {
+            log.info("No stale claims found for cutoff date: {}", cutoff);
+            return;
+        }
+
+        log.warn("Found {} claims stalled in PENDING_DOCUMENTS. Transitioning to ABANDONED.", staleClaims.size());
+
+        for (ClaimRecord record : staleClaims) {
+            int updatedRows = claimRepository.transitionClaimStatus(record.getClaimId(), "PENDING_DOCUMENTS", "ABANDONED");
+            if (updatedRows > 0) {
+                log.info("Successfully abandoned claim ID: {}", record.getClaimId());
+            } else {
+                log.error("Failed to abandon claim ID: {}. Status may have changed concurrently.", record.getClaimId());
+            }
+        }
+
+        log.info("Completed scheduled job: processStalePendingDocuments");
+    }
+}

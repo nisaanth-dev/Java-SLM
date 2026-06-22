@@ -1,0 +1,347 @@
+business_functional_name: |
+Loan Application Intake And Decision Management
+
+core_business_functionality: |
+This chunk allows prospective borrowers' loan applications to be submitted,
+retrieved, listed, and formally decided upon. It enforces basic eligibility
+checks on the requested loan amount and the allowed decision outcomes before
+handing off to deeper processing.
+
+business_function: |
+A new loan application can be submitted for review.
+An existing loan application can be looked up by its identifier.
+A final decision can be recorded against a loan application.
+Loan applications can be listed and filtered by their current status.
+
+business_functions_list: 
+  - Submit Application
+  - Retrieve Application
+  - Record Decision
+  - List Applications
+
+business_rules: 
+  - rule_id: "C001_BR1"
+
+rule: "A loan application cannot be submitted unless the amount the applicant is asking to borrow is greater than zero."
+
+condition: "The requested loan amount is missing or is zero or negative"
+
+action: "The submission is rejected as an invalid loan request"
+
+occurrence: "C001_BR1"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR2"
+
+rule: "If a newly submitted loan application is immediately found to be rejected, the applicant is informed with a response indicating the submission could not be processed, rather than a normal successful creation response."
+
+condition: "The newly created loan application's status is rejected"
+
+action: "The applicant receives an unprocessable submission response containing the rejected application details"
+
+occurrence: "C001_BR2"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR3"
+
+rule: "A request to look up a loan application that does not exist is treated as an error condition rather than returning empty information."
+
+condition: "No loan application exists for the identifier provided"
+
+action: "The requester is informed that the loan application could not be found"
+
+occurrence: "C001_BR3"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR4"
+
+rule: "A decision on a loan application may only be one of three outcomes: approved, rejected, or sent for manual review. Any other outcome is not permitted."
+
+condition: "The decision outcome supplied is not approved, rejected, or manual review (in any letter casing)"
+
+action: "The decision request is rejected as an invalid loan state"
+
+occurrence: "C001_BR4"
+
+source_chunks: ["C001"]
+---
+
+This chunk's imports bring in several classes from across the application.
+From the dto layer (com.meridianbank.loanorigination.dto),
+LoanApplicationRequest is imported as the request payload structure used for
+submitting a new application, LoanApplicationResponse as the response
+structure returned for created or fetched applications, and
+LoanDecisionResponse as the response structure returned after a decision is
+recorded. From the exception layer
+(com.meridianbank.loanorigination.exception), LoanApplicationNotFoundException
+is imported as the error raised when a requested application identifier does
+not exist, and InvalidLoanStateException is imported as the error raised when
+an application or decision request violates a basic state or input rule. From
+the service layer (com.meridianbank.loanorigination.service),
+LoanApplicationService is imported as the business logic dependency this
+controller delegates all loan application operations to. From external
+libraries: jakarta.validation.Valid provides the annotation that triggers Bean
+Validation on the incoming request body; lombok.RequiredArgsConstructor
+provides a generated constructor that takes all final fields (here,
+loanApplicationService) as parameters, enabling constructor injection without
+writing the constructor manually; org.slf4j.Logger and org.slf4j.LoggerFactory
+provide the logging interface and factory used to create the logger instance;
+org.springframework.http.HttpStatus and
+org.springframework.http.ResponseEntity provide the HTTP status code constants
+and the wrapper type used to build HTTP responses with a body and status; and
+the wildcard import org.springframework.web.bind.annotation.* provides the
+REST mapping annotations (@RestController, @RequestMapping, @PostMapping,
+@GetMapping, @PutMapping, @PathVariable, @RequestParam, @RequestBody) used
+throughout this class. The import java.util.List provides the collection type
+used for returning multiple loan applications.
+
+At the class level, the class is annotated with @RestController, marking it as
+a Spring MVC controller whose method return values are written directly to the
+HTTP response body (typically as JSON) rather than resolved as view names. It
+is annotated with @RequestMapping("/api/v1/loan-applications"), which
+establishes the base URL path that all the endpoint methods in this class are
+relative to. It is annotated with @RequiredArgsConstructor (from Lombok),
+which generates a constructor accepting the single final field declared in the
+class.
+
+The class declares a private static final field named logger of type Logger,
+initialized via LoggerFactory.getLogger(LoanApplicationController.class). This
+field represents the logging channel used to record diagnostic and audit
+information about requests this controller handles; it is a constant, class-
+wide logging utility rather than business data.
+
+The class declares a private final field named loanApplicationService of type
+LoanApplicationService. This is the injected business logic dependency through
+which this controller performs all loan application creation, retrieval,
+decision recording, and listing operations. Because the class is annotated
+with @RequiredArgsConstructor, Lombok generates a constructor that accepts
+this field as its only parameter and assigns it, fulfilling Spring's
+constructor injection requirements without an explicitly written constructor
+in the source.
+
+The primary flow of this chunk begins with the submitApplication method, since
+this is the entry point most central to the chunk's purpose (creating a new
+loan application) and is the first endpoint declared.
+
+The method submitApplication is declared as public, returns a
+ResponseEntity<LoanApplicationResponse>, and is annotated with @PostMapping,
+meaning it handles HTTP POST requests sent to the base path /api/v1/loan-
+applications (since no additional path is specified on the annotation). It
+takes one parameter, request, of type LoanApplicationRequest, annotated with
+both @Valid (triggering Bean Validation against the constraints declared on
+the LoanApplicationRequest DTO before the method body executes) and
+@RequestBody (indicating the parameter is populated by deserializing the
+incoming HTTP request body as JSON). The parameter request represents the full
+set of information an applicant has submitted for a new loan application.
+
+The first statement in the method body is a call to logger.info, with the
+literal format string "Received loan application submission for
+applicantId={}" and the argument request.getApplicantId(). This logs, for
+audit purposes, that a submission was received and which applicant it is
+associated with. This is an internal call to a logging utility and does not
+affect business logic flow; control proceeds to the next statement.
+
+Next, an if statement checks whether request.getRequestedAmount() == null is
+true, OR (if it is not null) whether request.getRequestedAmount().signum() <=
+0 is true. The signum() call on a numeric amount returns a value indicating
+whether the amount is negative, zero, or positive; a result less than or equal
+to 0 means the requested amount is zero or negative. If this combined
+condition is true â meaning either no requested amount was provided at all,
+or the amount provided is zero or a negative number â the method immediately
+constructs and throws a new InvalidLoanStateException, passing the literal
+string "Requested amount must be a positive value" as the exception's message.
+Throwing this exception terminates execution of submitApplication at this
+point; the exception will be handled elsewhere (outside this chunk) by the
+global exception handling mechanism, resulting in the caller receiving an
+error response indicating the requested amount was invalid. If the condition
+is false â meaning a requested amount was provided and it is a positive
+number â execution continues to the next statement.
+
+The next statement declares a local variable named response of type
+LoanApplicationResponse, and assigns it the return value of an internal call
+to loanApplicationService.createApplication(request), passing the request
+object (the full submitted application data) as its sole argument. Control
+transfers out to the createApplication operation on the loanApplicationService
+dependency, and its result â representing the newly created loan
+application's response representation, including whatever status it was
+assigned during creation â returns to this point and is assigned to
+response. Because loanApplicationService is a dependency defined in a
+different component, the internal logic of createApplication is not narrated
+here per the cross-chunk call rule; only what is visible from this calling
+code â that it is called with request and that its result is assigned to
+response â is described.
+
+The next statement is an if statement checking whether the literal string
+"REJECTED" equals response.getStatus() (using String.equals, with the literal
+as the receiver, meaning a null value for response.getStatus() would safely
+evaluate to false rather than throwing). If this condition is true â meaning
+the newly created application's status field is exactly the string "REJECTED"
+â the method immediately returns
+ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(response). This
+constructs an HTTP response with status code 422 (Unprocessable Entity) and a
+body containing the response object (the rejected application's details), and
+returns this response to the caller as the method's result, signifying to the
+caller that although the request was syntactically valid, the application
+itself was rejected upon creation. This return statement terminates the
+method. If the condition is false â meaning the application's status is
+anything other than the literal "REJECTED" â execution continues to the next
+statement.
+
+The final statement in the method is a return of
+ResponseEntity.status(HttpStatus.CREATED).body(response). This constructs an
+HTTP response with status code 201 (Created) and a body containing the
+response object, and returns this to the caller, signifying that a new loan
+application resource was successfully created and providing its details. This
+is the method's normal-path return value.
+
+Returning to the chunk's secondary flows: the method getApplication is
+declared as public, returns a ResponseEntity<LoanApplicationResponse>, and is
+annotated with @GetMapping("/{applicationId}"), meaning it handles HTTP GET
+requests to /api/v1/loan-applications/{applicationId}, where {applicationId}
+is a path variable. It takes one parameter, applicationId, of type Long,
+annotated with @PathVariable, meaning its value is extracted from the
+{applicationId} segment of the request URL. This parameter represents the
+unique identifier of the loan application being requested.
+
+The first statement calls logger.debug with the format string "Fetching loan
+application with id={}" and the argument applicationId, logging at debug level
+which application identifier is being looked up. Control proceeds to the next
+statement.
+
+The next statement declares a local variable named response of type
+LoanApplicationResponse and assigns it the return value of an internal call to
+loanApplicationService.getApplicationById(applicationId), passing the path-
+variable-derived identifier as its sole argument. Control transfers out to the
+getApplicationById operation on loanApplicationService, and its result â
+either a populated response representation of the loan application, or null if
+none exists â returns to this point and is assigned to response. Per the
+cross-chunk call rule, the internal logic of getApplicationById is not
+narrated here.
+
+The next statement is an if statement checking whether response == null is
+true. If this condition is true â meaning no loan application was found for
+the supplied applicationId â the method immediately constructs and throws a
+new LoanApplicationNotFoundException, passing the string formed by
+concatenating the literal "Loan application not found for id: " with the value
+of applicationId as the exception's message. This terminates execution of
+getApplication; the thrown exception is handled outside this chunk by the
+global exception handling mechanism, and the caller receives an error response
+indicating the application was not found. If the condition is false â
+meaning a response object was successfully retrieved â execution continues
+to the next statement.
+
+The final statement returns ResponseEntity.ok(response), constructing an HTTP
+response with status code 200 (OK) and a body containing the retrieved
+response object, and returning this to the caller as the method's result,
+signifying that the requested loan application was found and its details are
+provided.
+
+The method decideApplication is declared as public, returns a
+ResponseEntity<LoanDecisionResponse>, and is annotated with
+@PutMapping("/{applicationId}/decision"), meaning it handles HTTP PUT requests
+to /api/v1/loan-applications/{applicationId}/decision. It takes two
+parameters: applicationId, of type Long, annotated with @PathVariable,
+representing the identifier of the loan application being decided; and
+decisionOutcome, of type String, annotated with @RequestParam, representing
+the decision the caller wishes to record (e.g., approval, rejection, or manual
+review), supplied as a query parameter.
+
+The first statement calls logger.info with the format string "Processing
+decision for applicationId={} with outcome={}" and the arguments applicationId
+and decisionOutcome, logging which application is being decided and what
+outcome was requested. Control proceeds to the next statement.
+
+The next statement is an if statement with a compound condition combining
+three sub-checks with logical AND:
+!decisionOutcome.equalsIgnoreCase("APPROVED") (true if decisionOutcome is NOT,
+case-insensitively, the literal "APPROVED"), AND
+!decisionOutcome.equalsIgnoreCase("REJECTED") (true if decisionOutcome is NOT,
+case-insensitively, the literal "REJECTED"), AND
+!decisionOutcome.equalsIgnoreCase("MANUAL_REVIEW") (true if decisionOutcome is
+NOT, case-insensitively, the literal "MANUAL_REVIEW"). The overall condition
+is true only if decisionOutcome matches none of these three literals in any
+letter casing. If this condition is true â meaning the supplied
+decisionOutcome is not one of the three permitted values â the method
+immediately constructs and throws a new InvalidLoanStateException, passing the
+string formed by concatenating the literal "Unsupported decision outcome: "
+with the value of decisionOutcome as the exception's message. This terminates
+execution; the caller will receive an error response (handled outside this
+chunk) indicating the decision outcome was not supported. If the condition is
+false â meaning decisionOutcome matches "APPROVED", "REJECTED", or
+"MANUAL_REVIEW" in some letter casing â execution continues to the next
+statement.
+
+The next statement declares a local variable named decisionResponse of type
+LoanDecisionResponse, and assigns it the return value of an internal call to
+loanApplicationService.recordDecision(applicationId,
+decisionOutcome.toUpperCase()). The first argument, applicationId, is the
+identifier of the application being decided. The second argument is the result
+of calling toUpperCase() on decisionOutcome, transforming the originally-cased
+decision string into an entirely uppercase string before passing it on â
+meaning regardless of how the caller capitalized "approved", "rejected", or
+"manual_review", the value passed onward is normalized to uppercase form
+(e.g., "APPROVED", "REJECTED", "MANUAL_REVIEW"). Control transfers out to the
+recordDecision operation on loanApplicationService, and its result â a
+decision response representation â returns to this point and is assigned to
+decisionResponse. Per the cross-chunk call rule, the internal logic of
+recordDecision is not narrated here.
+
+The final statement returns ResponseEntity.ok(decisionResponse), constructing
+an HTTP response with status code 200 (OK) and a body containing the decision
+response object, and returning this to the caller as the method's result,
+signifying that the decision was successfully recorded and providing its
+details.
+
+The method listApplicationsByStatus is declared as public, returns a
+ResponseEntity<List<LoanApplicationResponse>>, and is annotated with
+@GetMapping, meaning it handles HTTP GET requests to the base path
+/api/v1/loan-applications. It takes one parameter, status, of type String,
+annotated with @RequestParam(required = false), meaning the status query
+parameter is optional and may be absent from the request, in which case status
+would be null. This parameter represents an optional filter on the loan
+application's current status.
+
+The first statement calls logger.debug with the format string "Listing loan
+applications with statusFilter={}" and the argument status, logging which
+status filter (or its absence, if null) was requested. Control proceeds to the
+next statement.
+
+The next statement declares a local variable named applications of type
+List<LoanApplicationResponse>, and assigns it the return value of an internal
+call to loanApplicationService.findApplicationsByStatus(status), passing the
+(possibly null) status filter as its sole argument. Control transfers out to
+the findApplicationsByStatus operation on loanApplicationService, and its
+result â a list of loan application response representations matching the
+filter, or all applications if the filter was null or unrecognized â returns
+to this point and is assigned to applications. Per the cross-chunk call rule,
+the internal logic of findApplicationsByStatus is not narrated here.
+
+The final statement returns ResponseEntity.ok(applications), constructing an
+HTTP response with status code 200 (OK) and a body containing the list of
+applications, and returning this to the caller as the method's result,
+signifying the set of loan applications matching the requested filter (or all
+applications, if no filter was effective).
+
+## Supporting Elements in This Chunk
+
+All four methods declared in this chunk â submitApplication, getApplication,
+decideApplication, and listApplicationsByStatus â are public entry points
+reachable directly via HTTP requests; none is a private helper reached only
+from within another method of this chunk. The class-level fields logger and
+loanApplicationService are used across all four methods and have been
+described above in the class-level declarations section. There are no fields,
+constants, or methods in this chunk that are unreached by the flows already
+narrated; this section is included only to confirm that no additional
+unreached elements exist beyond the four endpoint methods, each of which
+constitutes its own primary flow as an independent entry point. No explicit
+input validation beyond the requested-amount check and decision-outcome check
+is present in this chunk; no try/catch/finally blocks are present in this
+chunk â exceptions thrown here (InvalidLoanStateException,
+LoanApplicationNotFoundException) are allowed to propagate uncaught from this
+controller, relying on a global exception handling mechanism defined outside
+this chunk. No @Transactional annotation is present on this controller, which
+is consistent with controllers delegating transaction management to the
+service layer.

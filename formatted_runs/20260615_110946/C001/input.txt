@@ -1,0 +1,44 @@
+CHUNK_ID: C001
+
+APPLICATION: Loan Origination Context Service
+
+SERVICE: Loan Origination API Layer
+
+FILE: f01 (com.bank.loan.controller.LoanApplicationController)
+
+LINE_RANGE: f01_1-f01_380
+
+LAYER: Controller
+
+ENTRY_POINT: yes
+
+CALLED_BY: [EXTERNAL]
+
+CALLS_INTO: [C002]
+
+CALL_FLOW: EXTERNAL -> C001 -> C002
+
+=== CODE ===
+
+@RestController
+@RequestMapping("/api/v1/loans")
+public class LoanApplicationController {
+
+    private final LoanApplicationService loanApplicationService;
+
+    public LoanApplicationController(LoanApplicationService loanApplicationService) {
+        this.loanApplicationService = loanApplicationService;
+    }
+
+    @PostMapping("/applications")
+    public ResponseEntity<LoanResponse> create(@RequestBody LoanRequest request) {
+        LoanResponse response = loanApplicationService.createApplication(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @GetMapping("/applications/{loanId}")
+    public ResponseEntity<LoanResponse> fetch(@PathVariable String loanId) {
+        LoanResponse response = loanApplicationService.fetchApplication(loanId);
+        return ResponseEntity.ok(response);
+    }
+}

@@ -1,0 +1,64 @@
+business_functional_name: |
+Loan Application External Entry Processing
+
+source_line_ranges: ["f01_1-f01_380"]
+
+core_business_functionality: |
+This component exposes external APIs for creating and retrieving loan
+applications. It acts as the entry layer for all customer-driven loan
+origination requests.
+
+business_function: |
+Accept Loan Request
+Retrieve Loan Details
+
+business_functions_list: 
+  - Accept Loan
+  - Fetch Loan
+
+business_rules: 
+  - rule_id: "C001_BR1"
+
+rule: "A loan application can only be initiated when a valid request is submitted by an external client"
+
+condition: "Valid loan request is received"
+
+action: "Loan application process is initiated"
+
+occurrence: "C001_BR1"
+
+source_chunks: ["C001"]
+
+source_line_ranges: ["f01_1-f01_380"]
+
+---
+Technical Narrative:
+The LoanApplicationController class is annotated with @RestController, making
+it a REST API entry point.
+
+source_line_ranges: ["f01_1-f01_380"]
+
+The constructor injects LoanApplicationService, which is required for
+executing all business operations.
+
+source_line_ranges: ["f01_1-f01_380"]
+
+The create method receives a LoanRequest object from the HTTP request body and
+forwards it to loanApplicationService.createApplication.
+
+source_line_ranges: ["f01_1-f01_380"]
+
+Control transfers to chunk C002 where business validation and persistence
+logic is executed.
+
+source_line_ranges: ["f01_1-f01_380"]
+
+The fetch method retrieves loan details using a loanId path variable and
+delegates processing to loanApplicationService.fetchApplication.
+
+source_line_ranges: ["f01_1-f01_380"]
+
+The response from service layer is wrapped in ResponseEntity and returned to
+the external caller.
+
+source_line_ranges: ["f01_1-f01_380"]

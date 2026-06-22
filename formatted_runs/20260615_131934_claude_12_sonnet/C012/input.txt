@@ -1,0 +1,76 @@
+CHUNK_ID: C012
+
+APPLICATION: Meridian Loan Origination Platform
+
+SERVICE: loan-origination-service
+
+FILE: f11 (com.meridianbank.loanorigination.service.CreditBureauClient)
+
+LAYER: Service
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.meridianbank.loanorigination.service;
+
+import com.meridianbank.loanorigination.exception.CreditCheckUnavailableException;
+import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestTemplate;
+
+import java.util.Map;
+
+@Component
+@RequiredArgsConstructor
+public class CreditBureauClient {
+
+    private static final Logger logger = LoggerFactory.getLogger(CreditBureauClient.class);
+
+    private static final int DEFAULT_CREDIT_SCORE_WHEN_NO_RECORD = 600;
+
+    private final RestTemplate creditBureauRestTemplate;
+
+    public int fetchCreditScore(String nationalIdNumber) {
+        if (nationalIdNumber == null || nationalIdNumber.isBlank()) {
+            throw new CreditCheckUnavailableException("National ID number is required to perform a credit check");
+        }
+
+        String endpoint = "/v2/credit-scores/" + nationalIdNumber.trim();
+
+        ResponseEntity<Map> response;
+        try {
+            response = creditBureauRestTemplate.getForEntity(endpoint, Map.class);
+        } catch (HttpClientErrorException ex) {
+            if (ex.getStatusCode() == HttpStatus.NOT_FOUND) {
+                logger.warn("No credit history found for nationalIdNumber={}, using default score", nationalIdNumber);
+                return DEFAULT_CREDIT_SCORE_WHEN_NO_RECORD;
+            }
+            logger.error("Credit bureau returned client error for nationalIdNumber={}: {}", nationalIdNumber, ex.getStatusCode());
+            throw new CreditCheckUnavailableException("Credit bureau rejected the request for applicant national ID: " + nationalIdNumber);
+        }
+
+        Map body = response.getBody();
+        if (body == null || !body.containsKey("creditScore")) {
+            logger.warn("Credit bureau response missing creditScore field for nationalIdNumber={}", nationalIdNumber);
+            return DEFAULT_CREDIT_SCORE_WHEN_NO_RECORD;
+        }
+
+        Object scoreValue = body.get("creditScore");
+        if (scoreValue instanceof Number) {
+            return ((Number) scoreValue).intValue();
+        }
+
+        try {
+            return Integer.parseInt(scoreValue.toString());
+        } catch (NumberFormatException ex) {
+            logger.error("Unable to parse creditScore value '{}' for nationalIdNumber={}", scoreValue, nationalIdNumber);
+            return DEFAULT_CREDIT_SCORE_WHEN_NO_RECORD;
+        }
+    }
+}

@@ -1,0 +1,398 @@
+business_functional_name: |
+Loan Application Creation, Credit Evaluation, And Retrieval
+
+core_business_functionality: |
+This chunk creates new loan applications by linking them to an existing
+applicant, performing a credit check, and assigning an initial processing
+status based on creditworthiness and requested amount. It also supports
+retrieving a single loan application and listing applications filtered by
+status.
+
+business_function: |
+A new loan application can be created and linked to an applicant.
+A credit score is obtained for the applicant as part of creating the
+application.
+The application's initial status is determined based on credit score and loan
+amount.
+A single loan application can be retrieved by its identifier.
+Loan applications can be listed, optionally filtered by status.
+
+business_functions_list: 
+  - Create Application
+  - Evaluate Creditworthiness
+  - Assign Initial Status
+  - Retrieve Application
+  - List Applications
+
+business_rules: 
+  - rule_id: "C002_BR1"
+
+rule: "A loan application can only be created for an applicant who is already known to the organization."
+
+condition: "No applicant record exists for the applicant identifier provided"
+
+action: "The application creation fails with an error indicating the applicant could not be found"
+
+occurrence: "C002_BR1"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR2"
+
+rule: "If the applicant's credit score cannot be obtained at all, the application cannot proceed and the requester is informed that creditworthiness could not be assessed."
+
+condition: "The credit score lookup for the applicant fails or is unavailable"
+
+action: "The application creation fails with an error indicating the credit check could not be completed"
+
+occurrence: "C002_BR2"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR3"
+
+rule: "An applicant whose credit score is below the bank's minimum acceptable threshold of 620 has their loan application automatically rejected, with the reason recorded."
+
+condition: "The applicant's credit score is less than 620"
+
+action: "The loan application is marked as rejected and the reason for rejection is recorded as falling below the minimum credit score threshold"
+
+occurrence: "C002_BR3"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR4"
+
+rule: "A loan application requesting an amount greater than 50000, from an applicant who otherwise meets the minimum credit score, is set aside for manual review rather than being processed automatically."
+
+condition: "The applicant's credit score is at least 620 and the requested loan amount exceeds 50000"
+
+action: "The loan application is placed into a pending manual review status"
+
+occurrence: "C002_BR4"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR5"
+
+rule: "A loan application from an applicant who meets the minimum credit score and requests an amount of 50000 or less proceeds as a normal pending application awaiting standard processing."
+
+condition: "The applicant's credit score is at least 620 and the requested loan amount is 50000 or less"
+
+action: "The loan application is placed into a standard pending status"
+
+occurrence: "C002_BR5"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR6"
+
+rule: "When listing loan applications, if no status filter is provided, every loan application in the system is returned; if a status filter is provided, only applications matching that status, regardless of letter casing, are returned."
+
+condition: "A status filter is absent, blank, or present"
+
+action: "Either all applications are returned, or only applications matching the given status (case-insensitively) are returned"
+
+occurrence: "C002_BR6"
+
+source_chunks: ["C002"]
+---
+
+This chunk's imports bring in classes from across the application. From the
+dto layer (com.meridianbank.loanorigination.dto), LoanApplicationRequest is
+imported as the input structure representing a submitted loan application's
+data, LoanApplicationResponse as the output structure representing a loan
+application's details, and LoanDecisionResponse as the output structure
+representing a recorded decision (used only by a method not present in this
+chunk's body but referenced by the class's broader role â not used directly
+in this chunk's code). From the entity layer
+(com.meridianbank.loanorigination.entity), LoanApplication is imported as the
+persistent record representing a loan application, and Applicant is imported
+as the persistent record representing a person who has applied for a loan.
+From the exception layer (com.meridianbank.loanorigination.exception),
+LoanApplicationNotFoundException is imported as the error raised when a
+referenced applicant or application cannot be found, and
+CreditCheckUnavailableException is imported as the error raised when the
+credit bureau lookup cannot be completed. From the mapper layer
+(com.meridianbank.loanorigination.mapper), LoanApplicationMapper is imported
+as the dependency used to convert LoanApplication entities into
+LoanApplicationResponse DTOs. From the repository layer
+(com.meridianbank.loanorigination.repository), LoanApplicationRepository is
+imported as the data access dependency for loan application records, and
+ApplicantRepository is imported as the data access dependency for applicant
+records. From the event layer (com.meridianbank.loanorigination.event),
+LoanDecisionEventPublisher is imported as a dependency of this class
+representing the mechanism for publishing loan decision events (declared as a
+field but not invoked within this chunk's code). From external libraries:
+lombok.RequiredArgsConstructor provides a generated constructor taking all
+final fields as parameters; org.slf4j.Logger and org.slf4j.LoggerFactory
+provide the logging interface and factory;
+org.springframework.stereotype.Service provides the annotation marking this
+class as a Spring-managed service bean;
+org.springframework.transaction.annotation.Transactional provides the
+annotation that wraps annotated methods in a database transaction; and
+org.springframework.web.client.RestClientException provides the exception type
+caught when the external credit bureau call fails. The imports
+java.math.BigDecimal, java.time.LocalDateTime, java.util.List, and
+java.util.stream.Collectors provide, respectively: the type used for monetary
+amounts and thresholds, the type used to record the submission timestamp, the
+collection type used for lists of applications, and the utility used to
+collect a stream's results into a list.
+
+At the class level, the class is annotated with @Service, marking it as a
+Spring-managed service bean eligible for dependency injection and component
+scanning. It is annotated with @RequiredArgsConstructor (Lombok), which
+generates a constructor accepting all final fields declared below as
+parameters.
+
+The class declares a private static final field named logger of type Logger,
+used for logging diagnostic information; it is not business data.
+
+The class declares a private static final field named HIGH_VALUE_THRESHOLD of
+type BigDecimal, initialized to new BigDecimal("50000"). This constant
+represents the monetary threshold above which a requested loan amount is
+considered "high value" and is routed to manual review rather than automatic
+processing.
+
+The class declares a private static final field named
+MINIMUM_ACCEPTABLE_CREDIT_SCORE of type int, initialized to the literal 620.
+This constant represents the minimum credit score the bank requires an
+applicant to have in order for their loan application to proceed without
+automatic rejection.
+
+The class declares five private final injected dependencies:
+loanApplicationRepository of type LoanApplicationRepository, representing the
+data access point for persisting and querying loan application records;
+applicantRepository of type ApplicantRepository, representing the data access
+point for querying applicant records; loanApplicationMapper of type
+LoanApplicationMapper, representing the conversion utility between
+LoanApplication entities and their response DTOs; creditBureauClient of type
+CreditBureauClient, representing the external dependency used to obtain an
+applicant's credit score; and loanDecisionEventPublisher of type
+LoanDecisionEventPublisher, representing the mechanism for publishing events
+when loan decisions occur (declared here but not called within this chunk's
+code).
+
+The primary flow of this chunk is the createApplication method, as it is the
+chunk's main business operation â the method the controller in the previous
+chunk calls to create a new loan application.
+
+The method createApplication is declared as public, is annotated with
+@Transactional (meaning the entire method executes within a single database
+transaction, and if an unhandled exception propagates out of the method, any
+database changes made within it will be rolled back), and returns a
+LoanApplicationResponse. It takes one parameter, request, of type
+LoanApplicationRequest, representing the full submitted loan application data
+passed in from the controller.
+
+The first statement declares a local variable named applicant of type
+Applicant, and assigns it the result of calling
+applicantRepository.findById(request.getApplicantId()), which returns an
+Optional<Applicant>, followed by .orElseThrow(() -> new
+LoanApplicationNotFoundException("Applicant not found with id: " +
+request.getApplicantId())). This is a repository data access call: findById is
+invoked with the applicant identifier extracted from request.getApplicantId()
+as its parameter, and it returns either a populated Optional containing the
+matching Applicant record, or an empty Optional if no such applicant exists.
+If the Optional is empty, orElseThrow immediately constructs and throws a new
+LoanApplicationNotFoundException, with its message formed by concatenating the
+literal "Applicant not found with id: " with the value of
+request.getApplicantId(). This throw terminates createApplication; because the
+method is @Transactional, any database state changes attempted before this
+point (none have occurred yet) would be rolled back, and the caller receives
+an error indicating the applicant was not found. If the Optional is populated,
+its contained Applicant value is unwrapped and assigned to applicant, and
+execution continues to the next statement.
+
+The next statement declares a local variable named loanApplication of type
+LoanApplication, assigned the result of new LoanApplication() â constructing
+a new, empty loan application entity instance representing the loan
+application being created.
+
+The following five statements call setter methods on loanApplication to
+populate it: loanApplication.setApplicant(applicant) associates the newly
+created loan application with the applicant record retrieved earlier;
+loanApplication.setRequestedAmount(request.getRequestedAmount()) sets the
+requested loan amount to the value from the incoming request, representing how
+much money the applicant is asking to borrow;
+loanApplication.setLoanPurpose(request.getLoanPurpose()) sets the stated
+purpose of the loan from the incoming request;
+loanApplication.setTermInMonths(request.getTermInMonths()) sets the requested
+repayment term, in months, from the incoming request; and
+loanApplication.setSubmittedAt(LocalDateTime.now()) sets the submission
+timestamp to the current date and time at the moment of execution, constructed
+via LocalDateTime.now().
+
+The next statement calls loanApplication.setStatus("PENDING"), setting the
+loan application's status field to the literal string "PENDING" as an initial
+value â representing that the application has been received but not yet
+evaluated. (This initial value will potentially be overwritten later in the
+method based on the credit evaluation outcome.)
+
+The next statement declares a local variable named creditScore of type int,
+with no initializer at this point (it will be assigned inside the following
+try block).
+
+A try block follows. Inside the try block, the single statement assigns
+creditScore the return value of
+creditBureauClient.fetchCreditScore(applicant.getNationalIdNumber()). This is
+an external HTTP call (via the creditBureauClient dependency, an external
+system integration) to a credit bureau service, in business terms requesting
+the credit score for the applicant identified by their national identification
+number (obtained via applicant.getNationalIdNumber()); the expected response
+is an integer credit score, which is assigned to creditScore.
+
+The try block is followed by a catch block catching RestClientException ex â
+this exception type is raised if the HTTP call to the credit bureau fails
+(e.g., due to a network error, timeout, or non-success HTTP response, as
+represented by Spring's RestClientException hierarchy). The business condition
+that triggers this catch is that the credit bureau lookup could not be
+completed. Inside the catch block, the first statement calls logger.error with
+the format string "Credit bureau lookup failed for applicantId={}: {}" and the
+arguments applicant.getId() and ex.getMessage(), logging the applicant's
+identifier and the underlying exception's message for diagnostic purposes. The
+second statement constructs and throws a new CreditCheckUnavailableException,
+with its message formed by concatenating the literal "Unable to retrieve
+credit score for applicant: " with the value of applicant.getId(). This throw
+terminates createApplication; because the method is @Transactional and no
+database save has yet occurred, no rollback of persisted data is needed, but
+any transactional context opened by the method would be marked for rollback.
+The resulting business outcome is that the caller receives an error indicating
+the credit check could not be completed, and the loan application is not
+created.
+
+There is no finally block on this try/catch.
+
+If the try block completes without an exception, execution continues to the
+next statement after the try/catch:
+loanApplication.setCreditScoreAtSubmission(creditScore), which records the
+credit score obtained from the credit bureau onto the loan application entity,
+representing the applicant's creditworthiness at the time of this submission.
+
+The next statement is an if / else if / else chain with three branches. The
+first condition checks whether creditScore < MINIMUM_ACCEPTABLE_CREDIT_SCORE
+â that is, whether the credit score obtained is less than the literal
+constant 620. If this condition is true â meaning the applicant's credit
+score is below the bank's minimum acceptable threshold â two statements
+execute: loanApplication.setStatus("REJECTED") sets the application's status
+to the literal string "REJECTED", and loanApplication.setRejectionReason(...)
+sets the rejection reason field to the string formed by concatenating the
+literal "Credit score below minimum threshold of " with the value of
+MINIMUM_ACCEPTABLE_CREDIT_SCORE (620). If the first condition is false, the
+else if condition is evaluated:
+request.getRequestedAmount().compareTo(HIGH_VALUE_THRESHOLD) > 0 â that is,
+whether the requested amount, compared to the constant HIGH_VALUE_THRESHOLD
+(50000), is greater than it (compareTo returning a positive value means the
+left operand is greater). If this condition is true â meaning the
+applicant's credit score is acceptable (not below 620) but the requested
+amount exceeds 50000 â the single statement
+loanApplication.setStatus("PENDING_MANUAL_REVIEW") executes, setting the
+application's status to the literal string "PENDING_MANUAL_REVIEW". If both
+the first and second conditions are false â meaning the applicant's credit
+score is acceptable AND the requested amount does not exceed 50000 â the
+else branch executes the single statement
+loanApplication.setStatus("PENDING"), setting (or re-setting, since it was
+already set to this value earlier) the application's status to the literal
+string "PENDING".
+
+After the if/else if/else chain, the next statement declares a local variable
+named savedApplication of type LoanApplication, assigned the return value of
+loanApplicationRepository.save(loanApplication). This is a repository data
+access call: save is invoked with the fully populated loanApplication entity
+as its parameter, persisting the new loan application record (including its
+applicant association, requested amount, purpose, term, submission timestamp,
+status, credit score, and rejection reason if set) to the database, and
+returning the persisted entity (which will now include any database-generated
+identifier) as savedApplication.
+
+The next statement calls logger.info with the format string "Created loan
+application id={} with status={}" and the arguments savedApplication.getId()
+and savedApplication.getStatus(), logging the newly assigned identifier and
+final status of the created application for audit purposes.
+
+The final statement returns
+loanApplicationMapper.toResponse(savedApplication). This is an internal call
+to the loanApplicationMapper dependency's toResponse method, passing the
+persisted savedApplication entity; control transfers out to this mapping
+operation (defined in a different component) and its result â a
+LoanApplicationResponse representation of the saved application â returns to
+this point and is immediately returned as createApplication's result,
+signifying to the caller (the controller) the full details and final status of
+the newly created loan application.
+
+## Supporting Elements in This Chunk
+
+Two additional public methods in this chunk are not part of the
+createApplication primary flow and are narrated here as supporting elements.
+
+The method getApplicationById is declared as public, returns a
+LoanApplicationResponse, and takes one parameter, applicationId, of type Long,
+representing the identifier of the loan application to retrieve. Its single
+statement returns the result of a chained expression:
+loanApplicationRepository.findById(applicationId) is a repository data access
+call passing applicationId as its parameter and returning an
+Optional<LoanApplication> â either populated with the matching entity or
+empty if none exists. This is followed by
+.map(loanApplicationMapper::toResponse), a stream-like Optional operation: if
+the Optional is populated, the contained LoanApplication is passed to
+loanApplicationMapper.toResponse (an internal call to the mapper dependency,
+whose internal logic is defined in a different component and not narrated here
+per the cross-chunk rule), producing an Optional<LoanApplicationResponse>
+containing the mapped response; if the Optional was empty, .map has no effect
+and the Optional remains empty. Finally, .orElse(null) is applied: if the
+Optional (after the map step) is populated, its contained
+LoanApplicationResponse value is returned; if it is empty (meaning no loan
+application existed for applicationId), the literal value null is returned
+instead. This null return value is what the controller in the previous chunk
+checks for to determine whether to throw a LoanApplicationNotFoundException.
+
+The method findApplicationsByStatus is declared as public, returns a
+List<LoanApplicationResponse>, and takes one parameter, status, of type
+String, representing an optional filter on the loan application's status; this
+parameter may be null.
+
+The first statement declares a local variable named applications of type
+List<LoanApplication>, with no initializer at this point (it is assigned
+inside the following if/else).
+
+The next statement is an if/else with one condition: status == null ||
+status.isBlank(). This checks whether status is null, OR (if not null) whether
+status.isBlank() is true (meaning status consists entirely of whitespace or is
+an empty string). If this condition is true â meaning no meaningful status
+filter was provided â the statement applications =
+loanApplicationRepository.findAll() executes: this is a repository data access
+call with no parameters, returning every LoanApplication record in the
+database, which is assigned to applications. If the condition is false â
+meaning status is non-null and contains at least one non-whitespace character
+â the else branch executes applications =
+loanApplicationRepository.findByStatusIgnoreCase(status.trim()). Here,
+status.trim() is a string transformation: the original status value
+(potentially containing leading or trailing whitespace) is transformed by
+removing any leading and trailing whitespace, producing a cleaned status
+string representing the status value without incidental surrounding spaces;
+this cleaned value is passed as the parameter to the repository data access
+call findByStatusIgnoreCase, which returns every LoanApplication record whose
+status field matches the given value irrespective of letter casing, assigned
+to applications.
+
+The final statement returns the result of applications.stream().map(loanApplic
+ationMapper::toResponse).collect(Collectors.toList()). This is a stream
+operation treated as a loop: the data set processed is the list applications
+(every LoanApplication record retrieved above); for each element in this list,
+the map operation applies loanApplicationMapper::toResponse â an internal
+call to the mapper dependency's toResponse method for each LoanApplication
+entity, whose internal logic is defined elsewhere and not narrated here â
+producing a corresponding LoanApplicationResponse for each entity; the loop
+terminates once every element of applications has been processed; finally,
+.collect(Collectors.toList()) gathers all the produced LoanApplicationResponse
+values into a new List<LoanApplicationResponse>, which is returned as the
+method's result, representing the full set of loan applications matching the
+requested filter (or all applications, if no filter was effective), each
+converted to its response representation.
+
+No explicit null check is performed on request's individual fields
+(applicantId, requestedAmount, loanPurpose, termInMonths) within
+createApplication beyond what was already validated by the controller in the
+previous chunk; this chunk assumes those values are present and valid by the
+time they reach this method. No finally block is present anywhere in this
+chunk.

@@ -1,0 +1,446 @@
+business_functional_name: |
+Loan Application Record Definition
+
+core_business_functionality: |
+This component defines the central record that captures all details of a
+borrower's request for a loan, from the moment of submission through final
+credit decision. It governs how loan application data is stored, what fields
+are mandatory, how the application's lifecycle state is tracked, and what
+lifecycle events trigger automatic timestamp and status initialization.
+
+business_function: |
+Record the unique identity and reference of each loan application.
+Track the borrower associated with each application.
+Capture the amount requested by the borrower and the amount approved by the
+institution.
+Record the interest rate offered to the borrower.
+Store the repayment duration in months chosen by the borrower.
+Maintain the current status of the application throughout its lifecycle.
+Classify the application by loan product type.
+Capture the borrower's stated purpose for the loan.
+Record the borrower's credit score at the time of assessment.
+Track the borrower's debt-to-income ratio used in credit decisioning.
+Maintain the list of supporting documents attached to the application.
+Store the reason provided to the borrower when an application is declined.
+Record internal underwriter commentary on the application.
+Track the date and time the application was formally submitted.
+Record the date on which a credit decision was issued.
+Automatically set creation and last-updated timestamps on the application
+record.
+Initialize a new application to the Draft status if no status is supplied at
+creation time.
+Ensure the document collection is always initialized when a new application is
+first saved.
+Increment the record version and refresh the last-updated timestamp whenever
+the application is modified.
+Allow documents to be attached to an application while maintaining the
+bidirectional relationship.
+Allow documents to be detached from an application while maintaining the
+bidirectional relationship.
+Determine whether an application is in a state that allows editing by the
+borrower or officer.
+Determine whether an application is awaiting a credit decision.
+
+business_functions_list: 
+  - Identify Loan Application
+  - Track Borrower Association
+  - Record Requested Amount
+  - Record Approved Amount
+  - Store Interest Rate
+  - Track Repayment Tenure
+  - Monitor Application Status
+  - Classify Loan Type
+  - Capture Loan Purpose
+  - Record Credit Score
+  - Track Debt Ratio
+  - Manage Application Documents
+  - Record Rejection Reason
+  - Store Underwriter Notes
+  - Track Submission Timestamp
+  - Record Decision Date
+  - Initialize Application Record
+  - Assign Default Status
+  - Refresh Modification Timestamp
+  - Attach Supporting Document
+  - Detach Supporting Document
+  - Determine Editability Status
+  - Assess Decision Pending
+
+business_rules: 
+  - rule_id: "C001_BR1"
+
+rule: "Every loan application must carry a unique reference number that cannot be left blank."
+
+condition: "A loan application record is being saved for the first time."
+
+action: "The system requires a non-null, unique application reference of up to 20 characters to be present before the record can be stored."
+
+occurrence: "C001_BR1"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR2"
+
+rule: "Every loan application must be linked to a borrower; an application cannot exist without an associated individual."
+
+condition: "A loan application record is being saved."
+
+action: "The system requires a non-null borrower linkage before the record can be stored."
+
+occurrence: "C001_BR2"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR3"
+
+rule: "A new loan application that does not yet have a status assigned must default to Draft status."
+
+condition: "A loan application is being stored for the first time and its status field has not been set."
+
+action: "The system automatically assigns the Draft status to the application."
+
+occurrence: "C001_BR3"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR4"
+
+rule: "Every loan application record must record the exact date and time it was created and the exact date and time it was last changed; the creation timestamp is permanent and may never be altered after first recording."
+
+condition: "A loan application is created or subsequently updated."
+
+action: "The system stamps the record with the current date and time; the creation stamp is set once and locked, while the modification stamp is refreshed on every change."
+
+occurrence: "C001_BR4"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR5"
+
+rule: "Every modification to a loan application must increment the record's version number to support change tracking and concurrent-edit detection."
+
+condition: "A loan application record is updated."
+
+action: "The system adds 1 to the existing version number before saving the change."
+
+occurrence: "C001_BR5"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR6"
+
+rule: "A loan application may only be edited when it is in Draft status or has been returned for correction; applications in any other status are not open for modification."
+
+condition: "A check is made on whether the application record can accept changes."
+
+action: "The system confirms editability only when the application's status is Draft or Returned For Correction, and denies it in all other cases."
+
+occurrence: "C001_BR6"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR7"
+
+rule: "A credit decision is considered outstanding when an application is Under Review or awaiting documents; all other statuses indicate the decision cycle is not pending."
+
+condition: "A check is made on whether the application is still awaiting a credit decision."
+
+action: "The system confirms a pending decision only when the status is Under Review or Pending Documents."
+
+occurrence: "C001_BR7"
+
+source_chunks: ["C001"]
+
+---
+
+**Technical Narrative**
+
+**Imports and Framework Dependencies**
+
+This file opens at the top of the source for class `LoanApplication` in the
+`com.credex.loanorigination.entity` package. The in-application import
+`com.credex.loanorigination.entity.Applicant` brings in the `Applicant` entity
+from the same entity layer, representing the borrower whose identity is linked
+to each loan application. The imports from the `jakarta.persistence` package
+provide the full suite of JPA capabilities used in this class: `@Entity` marks
+the class as a persistent JPA-managed type; `@Table` binds it to a named
+database table; `@Id` and `@GeneratedValue` mark and configure the primary
+key; `@Column` constrains individual fields at the column level; `@Enumerated`
+controls how Java enum values are stored; `FetchType` controls when related
+objects are loaded; `CascadeType` controls which persistence operations
+propagate to related entities; `@JoinColumn` names the foreign-key column for
+a relationship; `@ManyToOne` and `@OneToMany` define the relationship
+cardinalities; `@PrePersist` and `@PreUpdate` register lifecycle callback
+methods; and `@Temporal` with `TemporalType` maps a legacy `java.util.Date`
+field to a database timestamp column. The Lombok imports `@Getter`, `@Setter`,
+and `@NoArgsConstructor` instruct Lombok to generate getters for every field,
+setters for every field, and a public no-argument constructor respectively â
+no explicit constructor, getter, or setter code is written in this class. The
+`java.math.BigDecimal` import provides the precise decimal arithmetic type
+used for all monetary and ratio fields. `java.time.LocalDateTime` provides the
+modern Java date-time type used for most timestamp fields. `java.util.Date` is
+imported for the single legacy `decisionDate` field that requires `@Temporal`
+mapping. `java.util.ArrayList` and `java.util.List` provide the collection
+type used for the document relationship.
+
+**Class-Level Declaration**
+
+The class `LoanApplication` carries four class-level annotations. `@Entity`
+registers it with the JPA provider as a managed persistent type. `@Table(name
+= "loan_applications")` maps it to the database table named
+`loan_applications`. `@Getter` and `@Setter` â established above in the
+imports discussion â cause Lombok to generate a public getter and a public
+setter for every field declared in this class. `@NoArgsConstructor` causes
+Lombok to generate a public no-argument constructor, which JPA requires for
+entity instantiation during result-set mapping.
+
+**Field Declarations â in Declaration Order**
+
+The field `applicationId` is of type `Long`. The annotation `@Id` marks it as
+the primary key of this entity. `@GeneratedValue(strategy =
+GenerationType.IDENTITY)` directs the database to generate the key value using
+an identity or auto-increment column. `@Column(name = "application_id")` maps
+it to the column named `application_id`. This field holds the system-generated
+unique numeric identifier for a loan application record.
+
+The field `applicationReference` is of type `String`. `@Column(name =
+"application_reference", nullable = false, unique = true, length = 20)` maps
+it to the column `application_reference`, enforces that the column cannot hold
+a null value, enforces a unique constraint across all rows in the table, and
+limits the stored value to 20 characters. This field holds the human-readable
+unique reference code assigned to each loan application.
+
+The field `applicant` is of type `Applicant`. `@ManyToOne(fetch =
+FetchType.LAZY)` declares a many-to-one relationship to the `Applicant`
+entity, meaning many loan applications may belong to one applicant, and the
+applicant record is not loaded from the database until it is explicitly
+accessed in code. `@JoinColumn(name = "applicant_id", nullable = false)`
+specifies that the foreign-key column in the `loan_applications` table is
+named `applicant_id` and cannot be null. This field represents the borrower
+who submitted the application.
+
+The field `requestedAmount` is of type `BigDecimal`. `@Column(name =
+"requested_amount", nullable = false, precision = 15, scale = 2)` maps it to
+column `requested_amount`, disallows null, and constrains it to a decimal with
+up to 15 total digits and exactly 2 decimal places. This field holds the
+monetary amount the borrower requested to borrow.
+
+The field `approvedAmount` is of type `BigDecimal`. `@Column(name =
+"approved_amount", precision = 15, scale = 2)` maps it to column
+`approved_amount` with the same decimal precision as `requestedAmount`, but
+without a not-null constraint, allowing it to remain empty until an approval
+decision is reached. This field holds the monetary amount the institution
+agreed to lend, which may differ from the requested amount.
+
+The field `interestRate` is of type `BigDecimal`. `@Column(name =
+"interest_rate", precision = 5, scale = 4)` maps it to column `interest_rate`
+with up to 5 digits total and 4 decimal places, suitable for storing a rate
+such as 0.0875. This field is nullable, reflecting that a rate is only
+assigned after a credit decision. It holds the annual interest rate offered to
+the borrower.
+
+The field `tenureMonths` is of type `Integer`. `@Column(name =
+"tenure_months", nullable = false)` maps it to column `tenure_months` and
+disallows null. This field holds the number of months over which the borrower
+is to repay the loan.
+
+The field `applicationStatus` is of type `ApplicationStatus`, a Java enum.
+`@Enumerated(EnumType.STRING)` directs JPA to store the enum value as its
+string name (e.g., `"DRAFT"`, `"UNDER_REVIEW"`) rather than its ordinal
+integer. `@Column(name = "application_status", nullable = false, length = 30)`
+maps it to column `application_status`, disallows null, and limits the stored
+string to 30 characters. This field tracks the application's current position
+in the loan origination lifecycle.
+
+The field `loanType` is of type `LoanType`, a Java enum.
+`@Enumerated(EnumType.STRING)` stores it as its string name. `@Column(name =
+"loan_type", nullable = false, length = 20)` maps it to column `loan_type`,
+disallows null, and limits the stored string to 20 characters. This field
+classifies the loan by product category.
+
+The field `purpose` is of type `String`. `@Column(name = "purpose", length =
+500)` maps it to column `purpose` and limits the value to 500 characters. This
+field is nullable; it holds the borrower's stated reason for requesting the
+loan.
+
+The field `creditScore` is of type `Integer`. `@Column(name = "credit_score")`
+maps it to column `credit_score`. This field is nullable; it records the
+numerical credit score obtained for the borrower during underwriting.
+
+The field `debtToIncomeRatio` is of type `BigDecimal`. `@Column(name =
+"debt_to_income_ratio", precision = 5, scale = 4)` maps it to column
+`debt_to_income_ratio` with up to 5 total digits and 4 decimal places. This
+field is nullable; it records the ratio of the borrower's total monthly debt
+obligations to gross monthly income, used in credit assessment.
+
+The field `documents` is of type `List<LoanDocument>`, initialized at
+declaration to `new ArrayList<>()` so the collection is never null.
+`@OneToMany(mappedBy = "loanApplication", cascade = CascadeType.ALL, fetch =
+FetchType.LAZY, orphanRemoval = true)` declares a one-to-many relationship to
+the `LoanDocument` entity: one loan application can have many documents. The
+`mappedBy = "loanApplication"` attribute indicates that the `LoanDocument`
+entity owns the foreign-key column and the relationship is navigated from the
+`LoanDocument.loanApplication` field. `CascadeType.ALL` means that any
+persist, merge, remove, refresh, or detach operation on a `LoanApplication`
+instance is automatically propagated to its associated `LoanDocument`
+instances. `FetchType.LAZY` means documents are not loaded from the database
+until explicitly accessed. `orphanRemoval = true` means that if a
+`LoanDocument` instance is removed from this list, it is automatically deleted
+from the database. This field represents the collection of supporting
+documents submitted with the application.
+
+The field `rejectionReason` is of type `String`. `@Column(name =
+"rejection_reason", length = 1000)` maps it to column `rejection_reason`,
+allows null, and limits the value to 1000 characters. This field holds the
+explanation communicated to the borrower when the application is declined.
+
+The field `underwriterNotes` is of type `String`. `@Column(name =
+"underwriter_notes", length = 2000)` maps it to column `underwriter_notes`,
+allows null, and limits the value to 2000 characters. This field holds
+internal commentary recorded by the underwriter during assessment, not shared
+with the borrower.
+
+The field `submittedAt` is of type `LocalDateTime`. `@Column(name =
+"submitted_at")` maps it to column `submitted_at`. This field is nullable; it
+records the exact date and time the borrower formally submitted the
+application for processing.
+
+The field `decisionDate` is of type `java.util.Date`.
+`@Temporal(TemporalType.TIMESTAMP)` instructs JPA to map this legacy date type
+to a full timestamp column. `@Column(name = "decision_date")` names the column
+`decision_date`. This field is nullable; it records the date on which a credit
+decision â approval or rejection â was issued.
+
+The field `createdAt` is of type `LocalDateTime`. `@Column(name =
+"created_at", nullable = false, updatable = false)` maps it to column
+`created_at`, disallows null, and â critically â marks it `updatable =
+false`, meaning the JPA provider will never include this column in SQL UPDATE
+statements after it is first written. This field permanently records the exact
+moment the application record was first created in the system.
+
+The field `updatedAt` is of type `LocalDateTime`. `@Column(name =
+"updated_at", nullable = false)` maps it to column `updated_at` and disallows
+null. This field records the most recent date and time the record was
+modified.
+
+The field `version` is of type `Long`, initialized at declaration to `0L`.
+`@Column(name = "version", nullable = false)` maps it to column `version` and
+disallows null. This field is used as an optimistic-locking version counter to
+detect concurrent modifications.
+
+**Lifecycle Callback â `onPrePersist()`**
+
+The method `onPrePersist()` is declared with `protected` access and a `void`
+return type. It carries the `@PrePersist` annotation, which causes the JPA
+provider to invoke this method automatically on the entity instance
+immediately before it is first inserted into the database. No arguments are
+accepted.
+
+Execution begins by calling `LocalDateTime.now()` â a call to an external
+Java standard library method â and assigning the returned current date-time
+value to the local variable `now` of type `LocalDateTime`. The value of `now`
+is then assigned to the instance field `this.createdAt`, setting the permanent
+creation timestamp. The same value `now` is simultaneously assigned to
+`this.updatedAt`, ensuring the creation timestamp and the initial last-updated
+timestamp are identical on first save.
+
+An `if` statement then checks whether `this.applicationStatus == null`. If
+this condition is true â meaning no status was assigned to this application
+before it was first saved â the method assigns the enum constant
+`ApplicationStatus.DRAFT` to `this.applicationStatus`, establishing the
+business policy that a new, unclassified application defaults to Draft status.
+If the condition is false â meaning `applicationStatus` was already set
+before the first save â the field is left unchanged.
+
+A second `if` statement checks whether `this.documents == null`. If this
+condition is true â meaning the documents collection was not initialized â
+the method assigns a new `ArrayList<>()` to `this.documents`, ensuring the
+collection is never null on a persisted entity. If the condition is false â
+meaning `documents` was already initialized at field declaration to a non-null
+`ArrayList<>()` â no action is taken. The method then returns to the JPA
+framework with no return value, and the insert operation proceeds.
+
+No exception handling is present in this method. No logging is performed. If
+an unexpected runtime error were to occur here, it would propagate as an
+unchecked exception and the JPA transaction would roll back.
+
+**Lifecycle Callback â `onPreUpdate()`**
+
+The method `onPreUpdate()` is declared with `protected` access and a `void`
+return type. It carries the `@PreUpdate` annotation, which causes the JPA
+provider to invoke this method automatically on the entity instance
+immediately before any update to an existing database row for this entity is
+issued. No arguments are accepted.
+
+The method calls `LocalDateTime.now()` (external standard-library call) and
+assigns the returned current date-time directly to `this.updatedAt`,
+refreshing the last-modified timestamp to the current moment. It then computes
+the expression `this.version + 1L` â adding the long literal `1` to the
+current version value â and assigns the result back to `this.version`,
+incrementing the optimistic-lock version counter. The method returns with no
+explicit value. No null check on `version` is performed here; the field is
+initialized at declaration to `0L` and always written before this update path
+can be invoked, so a null state is not anticipated in normal operation. No
+exception handling is present; errors propagate to the JPA framework.
+
+**Business Method â `addDocument(LoanDocument document)`**
+
+The method `addDocument` is declared `public` with a `void` return type. It
+accepts one parameter: `document` of type `LoanDocument`, representing a
+supporting document to be associated with this application. No null check is
+performed on `document` before use.
+
+The method calls `this.documents.add(document)`, appending the supplied
+`LoanDocument` to the application's document collection, thereby recording the
+ownership on the collection side of the bidirectional relationship. It then
+calls `document.setLoanApplication(this)`, setting the back-reference on the
+`LoanDocument` instance so that it points to this `LoanApplication` as its
+owning application, maintaining relational consistency on the `LoanDocument`
+side. No return value is produced. No transaction management is imposed at
+this level; the caller is responsible for ensuring this is invoked within a
+transactional context if persistence is intended.
+
+**Business Method â `removeDocument(LoanDocument document)`**
+
+The method `removeDocument` is declared `public` with a `void` return type. It
+accepts one parameter: `document` of type `LoanDocument`, representing a
+document to be disassociated from this application.
+
+The method calls `this.documents.remove(document)`, removing the supplied
+`LoanDocument` from the collection. Because `orphanRemoval = true` is set on
+the `documents` relationship, removing the document from this collection will
+cause the JPA provider to issue a delete for the `LoanDocument` row in the
+database at the next flush. The method then calls
+`document.setLoanApplication(null)`, clearing the back-reference on the
+`LoanDocument` instance so it no longer points to any application, maintaining
+relational consistency. No return value is produced. No null check on
+`document` is performed before invocation. No exception handling is present.
+
+**Business Method â `isEditable()`**
+
+The method `isEditable` is declared `public` and returns a `boolean`. It
+accepts no parameters. It evaluates a compound boolean expression: it checks
+whether `this.applicationStatus` equals the enum constant
+`ApplicationStatus.DRAFT` using `==` comparison, or (`||`) whether
+`this.applicationStatus` equals the enum constant
+`ApplicationStatus.RETURNED_FOR_CORRECTION`. If either condition is true, the
+method returns `true`, signalling that the application is currently open for
+modification. If both conditions are false â meaning `applicationStatus`
+holds any other value â the method returns `false`, signalling that the
+application cannot be edited in its current state. No exception handling is
+present.
+
+**Supporting Elements in This Chunk**
+
+The method `isDecisionPending()` is declared `public` and returns a `boolean`.
+It accepts no parameters. It is a supporting query method not invoked by any
+of the lifecycle callbacks or the document-management methods narrated in
+Stage 1, so it is narrated here.
+
+The method evaluates a compound boolean expression: it checks whether
+`this.applicationStatus` equals `ApplicationStatus.UNDER_REVIEW`, or (`||`)
+whether `this.applicationStatus` equals `ApplicationStatus.PENDING_DOCUMENTS`.
+If either is true, the method returns `true`, indicating that the application
+is waiting for a credit decision. If both conditions are false, the method
+returns `false`, indicating that the application is not in a pending-decision
+state. No exception handling is present.

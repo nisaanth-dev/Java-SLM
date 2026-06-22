@@ -1,0 +1,80 @@
+business_functional_name: |
+Stale Claim Monitor And Abandonment
+
+core_business_functionality: |
+Periodically scans the system for claims that have been waiting for documents
+for an extended period. Automatically transitions these inactive claims to an
+abandoned status to maintain processing hygiene.
+
+business_function: 
+  - Scans for claims stuck awaiting documentation.
+  - Calculates the cutoff date for inactivity.
+  - Abandons claims that exceed the waiting period.
+  - Logs the success or failure of each status transition.
+
+business_functions_list: 
+  - Scan System
+  - Calculate Cutoff
+  - Abandon Claim
+  - Log Result
+
+business_rules: 
+  - rule_id: "C009_BR1"
+
+rule: "If a claim remains in a state awaiting documents for more than fourteen days, it is considered stale and must be automatically transitioned to an abandoned status."
+
+condition: "Claim status is pending documents and creation date is older than fourteen days"
+
+action: "Transition status to abandoned"
+
+occurrence: "C009_BR1"
+
+source_chunks: ["C009"]
+
+Imports
+This chunk imports `ClaimRecord` and `ClaimRepository` from the internal
+domain to access database records. It imports Spring Framework annotations
+`@Scheduled`, `@Component`, and `@Transactional` which provide the
+capabilities to register background tasks, define managed beans, and enforce
+database transaction boundaries. It imports SLF4J `Logger` and
+`LoggerFactory`, along with standard Java `LocalDateTime` and `List`.
+
+Class-Level Declarations
+The `StaleClaimJob` class is annotated with `@Component`. It declares a
+constant `Logger` named `log` and a private, final injected dependency
+`claimRepository` of type `ClaimRepository`, initialized via a constructor.
+
+Primary Flow: processStalePendingDocuments
+The `processStalePendingDocuments` method acts as a scheduled entry point. It
+is annotated with `@Scheduled(cron = "0 0 * * * *")`, instructing the
+framework to trigger it chronologically (every hour), and `@Transactional`,
+ensuring database changes are committed atomically. It returns `void`.
+
+The method logs the start of the job. It declares a local variable `cutoff` of
+type `LocalDateTime` and assigns it the result of
+`LocalDateTime.now().minusDays(14)`. It declares a `List<ClaimRecord>` named
+`staleClaims` and assigns it the return value of an external cross-chunk call
+to `claimRepository.findStaleClaimsByStatus("PENDING_DOCUMENTS", cutoff)`.
+Control transfers out to the repository and returns with the matching records.
+
+An `if` statement checks whether `staleClaims` is `null` or if
+`staleClaims.isEmpty()` is true. If this condition is true, it logs that no
+stale claims were found for the cutoff and executes a `return` statement,
+terminating the job. If false, execution continues.
+
+The method logs a warning containing the size of the found claims.
+
+A `for` loop iterates over each `ClaimRecord` (aliased as `record`) in the
+`staleClaims` list. Inside the loop, it declares an `int` named `updatedRows`
+and assigns it the return value of the external cross-chunk call
+`claimRepository.transitionClaimStatus(record.getClaimId(),
+"PENDING_DOCUMENTS", "ABANDONED")`. Control transfers out and returns the
+integer count of modified rows.
+An `if` statement checks whether `updatedRows > 0` is true. If this condition
+is true, it logs a success message for the specific claim ID. If false (the
+`else` branch, meaning the database update failed due to concurrent changes),
+it logs an error indicating the failure. The loop then repeats for the next
+record until the list is exhausted.
+
+After the loop completes, the method logs the completion of the job and
+naturally terminates.

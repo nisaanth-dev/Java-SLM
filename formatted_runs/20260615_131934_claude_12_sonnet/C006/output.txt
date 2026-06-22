@@ -1,0 +1,147 @@
+business_functional_name: |
+Loan Application Submission Input Validation
+
+core_business_functionality: |
+This chunk defines the shape and validation constraints of the information an
+applicant must provide when submitting a new loan application. It ensures the
+applicant identity, requested amount, loan purpose, and repayment term all
+meet minimum data-quality requirements before the application is processed
+further.
+
+business_function: |
+An applicant identifier must be provided when submitting an application.
+A requested loan amount must be provided and must meet a minimum value.
+A loan purpose must be provided and must not be excessively long.
+A repayment term must be provided and must fall within an allowed range of
+months.
+
+business_functions_list: 
+  - Require Applicant Identity
+  - Validate Requested Amount
+  - Validate Loan Purpose
+  - Validate Repayment Term
+
+business_rules: 
+  - rule_id: "C006_BR1"
+
+rule: "A loan application submission must identify which applicant it belongs to."
+
+condition: "No applicant identifier is provided"
+
+action: "The submission is rejected as incomplete"
+
+occurrence: "C006_BR1"
+
+source_chunks: ["C006"]
+
+  - rule_id: "C006_BR2"
+
+rule: "A loan application must request an amount, and that amount must be at least 100.00."
+
+condition: "The requested amount is missing or is less than 100.00"
+
+action: "The submission is rejected as failing minimum amount requirements"
+
+occurrence: "C006_BR2"
+
+source_chunks: ["C006"]
+
+  - rule_id: "C006_BR3"
+
+rule: "A loan application must state its purpose, and that purpose description must not be excessively long, with a maximum of 100 characters."
+
+condition: "The loan purpose is missing, blank, or exceeds 100 characters"
+
+action: "The submission is rejected as failing loan purpose requirements"
+
+occurrence: "C006_BR3"
+
+source_chunks: ["C006"]
+
+  - rule_id: "C006_BR4"
+
+rule: "A loan application must specify a repayment term in months, and that term must be between 6 and 360 months inclusive."
+
+condition: "The repayment term is missing, less than 6 months, or greater than 360 months"
+
+action: "The submission is rejected as failing repayment term requirements"
+
+occurrence: "C006_BR4"
+
+source_chunks: ["C006"]
+---
+
+This chunk's imports provide the following capabilities.
+jakarta.validation.constraints.DecimalMin provides the annotation enforcing a
+minimum decimal value on a field. jakarta.validation.constraints.Max and
+jakarta.validation.constraints.Min provide annotations enforcing maximum and
+minimum numeric values on a field. jakarta.validation.constraints.NotBlank
+provides the annotation enforcing that a string field must not be null and
+must contain at least one non-whitespace character.
+jakarta.validation.constraints.NotNull provides the annotation enforcing that
+a field must not be null. jakarta.validation.constraints.Size provides the
+annotation enforcing minimum and/or maximum length constraints on a string
+field. lombok.Getter and lombok.Setter provide automatically generated getter
+and setter methods for every field in the class. java.math.BigDecimal provides
+the type used for the requested amount field.
+
+At the class level, the class is annotated with @Getter and @Setter (Lombok),
+generating getter and setter methods for every field declared below. This
+class carries no JPA or REST mapping annotations itself â its validation
+annotations take effect when an instance is passed into a method parameter
+annotated with @Valid, such as the submitApplication method on the controller
+described in the first chunk.
+
+The fields are described below in declaration order.
+
+The field applicantId is of type Long, annotated with @NotNull(message =
+"Applicant id is required"). This annotation enforces that the field must not
+be null when the object is validated; if it is null, the validation framework
+records the error message "Applicant id is required". This field represents
+the identifier of the applicant on whose behalf this loan application is being
+submitted â it corresponds to the request.getApplicantId() value used by the
+createApplication method in the second chunk to look up the Applicant record.
+
+The field requestedAmount is of type BigDecimal, annotated with
+@NotNull(message = "Requested amount is required") and @DecimalMin(value =
+"100.00", message = "Requested amount must be at least 100.00"). The @NotNull
+annotation enforces that the field must not be null, recording the message
+"Requested amount is required" if it is. The @DecimalMin(value = "100.00",
+...) annotation enforces that the field's numeric value must be greater than
+or equal to 100.00, recording the message "Requested amount must be at least
+100.00" if it is less. This field represents the monetary amount the applicant
+is requesting to borrow â it corresponds to the value checked by the
+controller's signum() guard in the first chunk and compared against
+HIGH_VALUE_THRESHOLD in the second chunk.
+
+The field loanPurpose is of type String, annotated with @NotBlank(message =
+"Loan purpose must not be blank") and @Size(max = 100, message = "Loan purpose
+must not exceed 100 characters"). The @NotBlank annotation enforces that the
+field must not be null and must contain at least one non-whitespace character,
+recording the message "Loan purpose must not be blank" if this is violated.
+The @Size(max = 100, ...) annotation enforces that the field's length must not
+exceed 100 characters, recording the message "Loan purpose must not exceed 100
+characters" if it does. This field represents the applicant's stated reason
+for requesting the loan â it corresponds to the value passed to
+loanApplication.setLoanPurpose(...) in the second chunk.
+
+The field termInMonths is of type Integer, annotated with @NotNull(message =
+"Term in months is required"), @Min(value = 6, message = "Term must be at
+least 6 months"), and @Max(value = 360, message = "Term must not exceed 360
+months"). The @NotNull annotation enforces that the field must not be null,
+recording "Term in months is required" if it is. The @Min(value = 6, ...)
+annotation enforces that the field's value must be at least 6, recording "Term
+must be at least 6 months" if it is less. The @Max(value = 360, ...)
+annotation enforces that the field's value must not exceed 360, recording
+"Term must not exceed 360 months" if it does. This field represents the
+repayment period the applicant is requesting for the loan, expressed in months
+â it corresponds to the value passed to loanApplication.setTermInMonths(...)
+in the second chunk.
+
+## Supporting Elements in This Chunk
+
+This class declares no constructors beyond the implicit default constructor,
+and no methods beyond the Lombok-generated getters and setters implied by
+@Getter and @Setter. All four fields are described in the field walkthrough
+above; none remain unreached. This section is included to confirm no
+additional unreached elements exist.

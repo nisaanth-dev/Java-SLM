@@ -1,0 +1,283 @@
+business_functional_name: |
+External Credit Score Retrieval And Fallback Handling
+
+core_business_functionality: |
+This chunk retrieves an applicant's credit score from the external credit
+bureau service using their national identification number. It applies a
+default score when the bureau has no record, when the response is malformed,
+or when the returned score cannot be interpreted, while treating outright
+communication failures as a hard error.
+
+business_function: |
+A credit score is requested from the external credit bureau using the
+applicant's national identification number.
+A default credit score is used when the bureau has no credit history for the
+applicant.
+A default credit score is used when the bureau's response does not contain a
+usable score.
+A request without a national identification number cannot proceed to a credit
+check.
+A request that the credit bureau outright rejects results in the credit check
+being treated as unavailable.
+
+business_functions_list: 
+  - Request Credit Score
+  - Apply Default Score
+  - Reject Missing Identity
+  - Flag Bureau Rejection
+
+business_rules: 
+  - rule_id: "C012_BR1"
+
+rule: "A credit check cannot be performed without the applicant's national identification number."
+
+condition: "The applicant's national identification number is missing or blank"
+
+action: "The credit check is treated as unable to be completed"
+
+occurrence: "C012_BR1"
+
+source_chunks: ["C012"]
+
+  - rule_id: "C012_BR2"
+
+rule: "If the credit bureau has no credit history on file for an applicant, the applicant is assigned a default credit score of 600 rather than the application failing."
+
+condition: "The credit bureau indicates no record exists for the applicant's national identification number"
+
+action: "A default credit score of 600 is used for the applicant"
+
+occurrence: "C012_BR2"
+
+source_chunks: ["C012"]
+
+  - rule_id: "C012_BR3"
+
+rule: "If the credit bureau rejects the request for any reason other than having no record for the applicant, the credit check is treated as unable to be completed."
+
+condition: "The credit bureau returns a client error response that is not a not-found response"
+
+action: "The credit check is treated as unable to be completed"
+
+occurrence: "C012_BR3"
+
+source_chunks: ["C012"]
+
+  - rule_id: "C012_BR4"
+
+rule: "If the credit bureau responds without providing a usable credit score value, a default credit score of 600 is used for the applicant rather than the application failing."
+
+condition: "The credit bureau's response is empty, does not contain a credit score field, or contains a credit score value that cannot be interpreted as a number"
+
+action: "A default credit score of 600 is used for the applicant"
+
+occurrence: "C012_BR4"
+
+source_chunks: ["C012"]
+---
+
+This chunk's imports bring in classes from across the application. From the
+exception layer (com.meridianbank.loanorigination.exception),
+CreditCheckUnavailableException is imported as the error raised when a credit
+check cannot be performed or completed. From external libraries:
+lombok.RequiredArgsConstructor provides a generated constructor accepting all
+final fields as parameters; org.slf4j.Logger and org.slf4j.LoggerFactory
+provide the logging interface and factory; org.springframework.http.HttpStatus
+provides the HTTP status code constants, specifically used here to check for a
+not-found response; org.springframework.http.ResponseEntity provides the
+wrapper type representing an HTTP response including its body;
+org.springframework.stereotype.Component provides the annotation marking this
+class as a generic Spring-managed bean (this is the type of the
+creditBureauClient dependency injected into the service in the second chunk);
+org.springframework.web.client.HttpClientErrorException provides the exception
+type thrown by RestTemplate when an HTTP call receives a 4xx client error
+response; and org.springframework.web.client.RestTemplate provides the class
+used to make the synchronous HTTP call to the credit bureau. The import
+java.util.Map provides the type used to represent the parsed JSON response
+body from the credit bureau.
+
+At the class level, the class is annotated with @Component, marking it as a
+generic Spring-managed bean eligible for dependency injection. It is annotated
+with @RequiredArgsConstructor (Lombok), generating a constructor accepting the
+single final field declared below.
+
+The class declares a private static final field named logger of type Logger,
+used for logging diagnostic information; it is not business data.
+
+The class declares a private static final field named
+DEFAULT_CREDIT_SCORE_WHEN_NO_RECORD of type int, initialized to the literal
+value 600. This constant represents the credit score assigned to an applicant
+when the credit bureau has no record for them, or when their actual score
+cannot be determined from the bureau's response.
+
+The class declares a private final field named creditBureauRestTemplate of
+type RestTemplate. This is the injected dependency representing the configured
+connection to the external credit bureau service (the bean produced by the
+creditBureauRestTemplate method in the eleventh chunk's configuration class),
+through which this client makes its HTTP call.
+
+The primary flow of this chunk is the fetchCreditScore method, as it is the
+chunk's only method and is the operation called by the service in the second
+chunk (creditBureauClient.fetchCreditScore(applicant.getNationalIdNumber())).
+
+The method fetchCreditScore is declared as public, returns int, and takes one
+parameter, nationalIdNumber, of type String, representing the applicant's
+national identification number, used to identify them to the credit bureau.
+
+The first statement is an if statement checking the compound condition
+nationalIdNumber == null || nationalIdNumber.isBlank() â that is, whether
+nationalIdNumber is null, OR (if not null) whether nationalIdNumber.isBlank()
+is true (meaning it consists entirely of whitespace or is empty). If this
+condition is true â meaning no usable national identification number was
+provided â the method immediately constructs and throws a new
+CreditCheckUnavailableException, passing the literal string "National ID
+number is required to perform a credit check" as the exception's message. This
+throw terminates fetchCreditScore; the caller (the second chunk's
+createApplication method, within its try block) will catch this â although
+note that fetchCreditScore itself throws CreditCheckUnavailableException
+directly here, while the second chunk's try block catches RestClientException;
+this particular throw, if it occurred, would NOT be caught by that try block
+and would propagate further up, ultimately reaching the global exception
+handling mechanism defined outside this chunk. If the condition is false â
+meaning nationalIdNumber is non-null and contains at least one non-whitespace
+character â execution continues to the next statement.
+
+The next statement declares a local variable named endpoint of type String,
+assigned the result of string concatenation: the literal "/v2/credit-scores/"
+concatenated with nationalIdNumber.trim(). Here, nationalIdNumber.trim() is a
+string transformation: the original nationalIdNumber value (potentially
+containing leading or trailing whitespace) is transformed by removing any
+leading and trailing whitespace, producing a cleaned identification number;
+this cleaned value is appended to the literal path prefix "/v2/credit-scores/"
+to form the full relative endpoint path representing the credit bureau's
+credit-score lookup resource for this specific applicant.
+
+The next statement declares a local variable named response of type
+ResponseEntity<Map>, with no initializer at this point (it will be assigned
+inside the following try block).
+
+A try block follows. Inside the try block, the single statement assigns
+response the return value of creditBureauRestTemplate.getForEntity(endpoint,
+Map.class). This is an external HTTP call (GET request) to the credit bureau
+service, using the configured creditBureauRestTemplate (whose root URI is
+https://api.creditbureau-partner.com, per the eleventh chunk), targeting the
+relative endpoint constructed above; in business terms, this requests the
+credit score record for the applicant identified by nationalIdNumber. The
+expected response is deserialized into a Map (as specified by Map.class),
+wrapped in a ResponseEntity that includes both the response body and HTTP
+status, and this is assigned to response.
+
+The try block is followed by a catch block catching HttpClientErrorException
+ex â this exception type is raised by RestTemplate when the credit bureau
+responds with an HTTP 4xx client error status. The business condition that
+triggers this catch is that the credit bureau returned an error response to
+the credit score request. Inside the catch block, the first statement is an if
+statement checking whether ex.getStatusCode() == HttpStatus.NOT_FOUND is true
+â that is, whether the error response's status code is specifically 404 Not
+Found. If this condition is true â meaning the credit bureau has no credit
+history on file for this applicant â two statements execute: logger.warn is
+called with the format string "No credit history found for
+nationalIdNumber={}, using default score" and the argument nationalIdNumber,
+logging that no record exists; then the method immediately returns the literal
+value DEFAULT_CREDIT_SCORE_WHEN_NO_RECORD (600), signifying to the caller
+that, in the absence of any credit history, a default score of 600 is used for
+this applicant. This return terminates fetchCreditScore. If the condition is
+false â meaning the client error status code is something other than 404
+(e.g., a 400 or 401 response from the credit bureau) â two statements
+execute: logger.error is called with the format string "Credit bureau returned
+client error for nationalIdNumber={}: {}" and the arguments nationalIdNumber
+and ex.getStatusCode(), logging the error status code received; then the
+method immediately constructs and throws a new
+CreditCheckUnavailableException, with its message formed by concatenating the
+literal "Credit bureau rejected the request for applicant national ID: " with
+the value of nationalIdNumber. This throw terminates fetchCreditScore; the
+resulting business outcome is that the credit check is treated as unavailable
+for this applicant, and (per the second chunk) this exception type is what the
+caller's catch block does NOT match â note that the second chunk's
+createApplication catches RestClientException, and HttpClientErrorException is
+itself a subtype of RestClientException, but this particular throw is of type
+CreditCheckUnavailableException, which would propagate past that catch and be
+handled by the global exception handling mechanism defined outside this chunk.
+
+There is no finally block on this try/catch.
+
+If the try block completes without an exception (meaning a non-error HTTP
+response was received), execution continues to the next statement after the
+try/catch: a local variable named body of type Map is declared, assigned the
+result of response.getBody() â extracting the deserialized response body (or
+null if the body was empty) from the response object.
+
+The next statement is an if statement checking the compound condition body ==
+null || !body.containsKey("creditScore") â that is, whether body is null, OR
+(if not null) whether body does NOT contain a key equal to the literal string
+"creditScore". If this condition is true â meaning either the response body
+was empty, or it was present but did not include a creditScore field â two
+statements execute: logger.warn is called with the format string "Credit
+bureau response missing creditScore field for nationalIdNumber={}" and the
+argument nationalIdNumber, logging that the expected field was absent; then
+the method immediately returns the literal value
+DEFAULT_CREDIT_SCORE_WHEN_NO_RECORD (600), signifying to the caller that, in
+the absence of a usable score in the response, a default score of 600 is used.
+This return terminates fetchCreditScore. If the condition is false â meaning
+body is non-null and contains a key "creditScore" â execution continues to
+the next statement.
+
+The next statement declares a local variable named scoreValue of type Object,
+assigned the result of body.get("creditScore") â extracting the value
+associated with the key "creditScore" from the response body map; this is the
+JSON construction/parsing step, where the credit score field is extracted from
+the parsed response structure, representing the applicant's raw credit score
+value as returned by the bureau (its exact type is not yet known, hence
+Object).
+
+The next statement is an if statement checking whether scoreValue instanceof
+Number is true â that is, whether the extracted value is an instance of the
+Number type (e.g., it was deserialized as an Integer, Long, or Double). If
+this condition is true â meaning the credit bureau returned the credit score
+as a numeric JSON value â the method immediately returns the result of
+((Number) scoreValue).intValue(), which casts scoreValue to Number and then
+extracts its integer value, discarding any fractional component if present.
+This return terminates fetchCreditScore, signifying to the caller that the
+applicant's credit score, as returned numerically by the bureau, is this
+integer value. If the condition is false â meaning the credit bureau
+returned the credit score as something other than a numeric JSON type (e.g.,
+as a JSON string) â execution continues to the next statement.
+
+A second try block follows. Inside this try block, the single statement
+returns the result of Integer.parseInt(scoreValue.toString()). Here,
+scoreValue.toString() is a string transformation: the raw scoreValue object
+(of unknown non-Number type) is converted to its string representation;
+Integer.parseInt then attempts to parse this string as an integer. If
+successful, this integer value is immediately returned as the method's result,
+signifying to the caller that the applicant's credit score, as returned by the
+bureau in string form and successfully parsed, is this integer value. This
+return terminates fetchCreditScore.
+
+This second try block is followed by a catch block catching
+NumberFormatException ex â this exception type is raised if
+scoreValue.toString() does not represent a valid integer (e.g., it is non-
+numeric text). The business condition that triggers this catch is that the
+credit bureau's returned credit score value could not be interpreted as a
+number. Inside the catch block, the first statement calls logger.error with
+the format string "Unable to parse creditScore value '{}' for
+nationalIdNumber={}" and the arguments scoreValue and nationalIdNumber,
+logging the unparseable value and the applicant it was for. The second
+statement returns the literal value DEFAULT_CREDIT_SCORE_WHEN_NO_RECORD (600),
+signifying to the caller that, since the bureau's score value could not be
+interpreted, a default score of 600 is used for this applicant. This return
+terminates fetchCreditScore.
+
+There is no finally block on this second try/catch.
+
+## Supporting Elements in This Chunk
+
+This chunk contains a single method, fetchCreditScore, which constitutes the
+entire primary flow via its sequential statements, conditionals, and two
+try/catch blocks; there are no additional fields, constants, or overloaded
+methods left unreached. Both class-level constant fields (logger and
+DEFAULT_CREDIT_SCORE_WHEN_NO_RECORD) and the single injected dependency
+(creditBureauRestTemplate) are used within the narrated flow. This section is
+included to confirm no additional unreached elements exist. No @Transactional
+annotation is present on this class or method, which is expected since this
+chunk performs no database operations â it solely makes an external HTTP
+call and applies fallback logic to its response.

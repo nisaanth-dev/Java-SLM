@@ -1,0 +1,102 @@
+business_functional_name: |
+Global Error Translation
+
+core_business_functionality: |
+Intercepts system failures and invalid input events before they reach the
+user. Translates these technical failures into safe, standardized business
+status responses to prevent information leakage and ensure consistent
+communication.
+
+business_function: 
+  - Intercepts internal domain processing errors.
+  - Translates system failures into a standardized error status.
+  - Intercepts input data validation violations.
+  - Consolidates specific field validation errors into a secure log entry.
+  - Translates validation failures into a standardized rejection status.
+
+business_functions_list: 
+  - Intercept System Errors
+  - Translate Failures
+  - Intercept Validation Violations
+  - Consolidate Errors
+  - Reject Invalid Input
+
+business_rules: 
+  - rule_id: "C006_BR1"
+
+rule: "If an internal domain processing error occurs during claim handling, the operation is aborted and a standard system error status is returned to the caller without exposing technical details."
+
+condition: "An internal domain exception is thrown"
+
+action: "Return a system error status"
+
+occurrence: "C006_BR1"
+
+source_chunks: ["C006"]
+
+  - rule_id: "C006_BR2"
+
+rule: "If an incoming request violates data validation rules, all specific field violations must be logged internally, and the request is rejected with a standard invalid payload status."
+
+condition: "Incoming request fails payload validation"
+
+action: "Log field violations and return an invalid payload status"
+
+occurrence: "C006_BR2"
+
+source_chunks: ["C006"]
+
+Imports
+This chunk imports ClaimResponse from the com.acme.insurance.claims.dto layer
+to construct error output payloads. It imports external Spring Framework Web
+and HTTP components (HttpStatus, ResponseEntity,
+MethodArgumentNotValidException, ExceptionHandler, RestControllerAdvice) which
+provide the capabilities to intercept exceptions globally and format HTTP
+responses. It imports SLF4J Logger and LoggerFactory for logging capabilities,
+and Java Collectors for string manipulation.
+
+Class-Level Declarations
+The GlobalExceptionHandler class is annotated with @RestControllerAdvice,
+marking it as a global interceptor for REST controllers. It declares a
+constant Logger named log.
+
+Primary Flow: handleClaimSystemException
+The handleClaimSystemException method acts as an external entry point
+triggered by the framework. It is annotated with
+@ExceptionHandler(ClaimSystemException.class), meaning it intercepts any
+thrown instance of the custom ClaimSystemException. It returns a
+ResponseEntity<ClaimResponse> and accepts the intercepted ClaimSystemException
+named ex as its parameter.
+
+The method begins by logging the error at the ERROR level, extracting the
+specific error context by calling ex.getErrorCode() and ex.getMessage() as
+inputs to the log statement, alongside the exception stack trace. It declares
+a local variable errorResponse of type ClaimResponse and initializes it via
+object construction new ClaimResponse(). It then assigns the literal value
+"SYSTEM_ERROR" to the payload's status by calling
+errorResponse.setClaimStatus("SYSTEM_ERROR"). Finally, it constructs and
+returns a ResponseEntity assigned an HTTP status of
+HttpStatus.INTERNAL_SERVER_ERROR, containing the errorResponse object in its
+body, thereby translating a thrown exception into a structured output.
+
+Supporting Elements in This Chunk
+The handleValidationException method is annotated with
+@ExceptionHandler(MethodArgumentNotValidException.class), acting as a
+framework entry point that intercepts validation failures. It returns a
+ResponseEntity<ClaimResponse> and accepts MethodArgumentNotValidException
+named ex.
+
+The method declares a String local variable named validationErrors. It
+populates this by executing a chain of stream operations: it retrieves the
+data set via the external call ex.getBindingResult().getFieldErrors(), opens a
+.stream(), and applies a .map() lambda function. For each field error (aliased
+as error), the map transformation concatenates the result of error.getField(),
+the literal string ": ", and the result of error.getDefaultMessage(). It then
+reduces the stream into a single string via .collect(Collectors.joining(",
+")).
+
+After building the string, it logs the consolidated validation errors as a
+warning. It instantiates a new ClaimResponse named errorResponse and assigns
+the literal value "INVALID_PAYLOAD" to its status via
+errorResponse.setClaimStatus("INVALID_PAYLOAD"). It returns a ResponseEntity
+constructed with HttpStatus.BAD_REQUEST and the errorResponse body.

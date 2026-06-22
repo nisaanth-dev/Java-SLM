@@ -1,0 +1,66 @@
+CHUNK_ID: C010
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f10 (com.acme.insurance.claims.filter.SystemContextFilter)
+
+LAYER: Filter
+
+ENTRY_POINT: yes
+
+=== CODE ===
+
+package com.acme.insurance.claims.filter;
+
+import jakarta.servlet.Filter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.stereotype.Component;
+import org.slf4j.MDC;
+import java.io.IOException;
+import java.util.UUID;
+
+/**
+ * Intercepts all incoming HTTP requests to establish diagnostic context.
+ * Extracts or generates correlation IDs for end-to-end trace tracking.
+ */
+@Component
+public class SystemContextFilter implements Filter {
+
+    private static final String TRACE_HEADER = "X-B3-TraceId";
+    private static final String MDC_KEY = "traceId";
+
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+
+        if (!(request instanceof HttpServletRequest) || !(response instanceof HttpServletResponse)) {
+            chain.doFilter(request, response);
+            return;
+        }
+
+        HttpServletRequest httpRequest = (HttpServletRequest) request;
+        HttpServletResponse httpResponse = (HttpServletResponse) response;
+
+        String traceId = httpRequest.getHeader(TRACE_HEADER);
+
+        if (traceId == null || traceId.trim().isEmpty()) {
+            traceId = UUID.randomUUID().toString();
+        }
+
+        MDC.put(MDC_KEY, traceId);
+        httpResponse.setHeader(TRACE_HEADER, traceId);
+
+        try {
+            chain.doFilter(httpRequest, httpResponse);
+        } finally {
+            MDC.remove(MDC_KEY);
+        }
+    }
+}

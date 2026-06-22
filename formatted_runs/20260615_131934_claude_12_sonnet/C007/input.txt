@@ -1,0 +1,49 @@
+CHUNK_ID: C007
+
+APPLICATION: Meridian Loan Origination Platform
+
+SERVICE: loan-origination-service
+
+FILE: f06 (com.meridianbank.loanorigination.dto.LoanApplicationResponse / LoanDecisionResponse)
+
+LAYER: DTO
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.meridianbank.loanorigination.dto;
+
+import lombok.Getter;
+import lombok.Setter;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+@Getter
+@Setter
+public class LoanApplicationResponse {
+
+    private Long id;
+    private Long applicantId;
+    private String applicantFullName;
+    private BigDecimal requestedAmount;
+    private BigDecimal approvedAmount;
+    private String loanPurpose;
+    private Integer termInMonths;
+    private String status;
+    private String rejectionReason;
+    private Integer creditScoreAtSubmission;
+    private LocalDateTime submittedAt;
+    private LocalDateTime decisionedAt;
+}
+
+@Getter
+@Setter
+public class LoanDecisionResponse {
+
+    private Long applicationId;
+    private String previousStatus;
+    private String newStatus;
+    private LocalDateTime decisionedAt;
+}

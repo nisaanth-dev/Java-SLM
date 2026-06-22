@@ -1,0 +1,39 @@
+CHUNK_ID: C018
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f18 (com.acme.insurance.claims.dto.PaymentRequest)
+
+LAYER: DTO
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.acme.insurance.claims.dto;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.AllArgsConstructor;
+import java.math.BigDecimal;
+
+/**
+ * Outbound payload structure for triggering financial transactions in external gateways.
+ */
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class PaymentRequest {
+
+    @JsonProperty("claim_identifier")
+    private String claimIdentifier;
+
+    @JsonProperty("total_amount")
+    private BigDecimal totalAmount;
+
+    @JsonProperty("currency_code")
+    private String currencyCode = "USD";
+}

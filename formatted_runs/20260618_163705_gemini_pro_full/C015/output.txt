@@ -1,0 +1,49 @@
+business_functional_name: |
+Document Data Access
+
+core_business_functionality: |
+Provides direct access to the underlying storage for claim supporting
+documents. Enables the retrieval of all files linked to a specific claim
+identifier.
+
+business_function: 
+  - Retrieves document records from the database.
+  - Queries all supplementary files associated with a specific parent claim.
+
+business_functions_list: 
+  - Retrieve Records
+  - Query Files
+
+business_rules: 
+  - rule_id: "C015_BR1"
+
+rule: "To assemble a complete claim profile, the system must retrieve all documents mapped to the claim's core identifier."
+
+condition: "System requests documents for a specific claim identifier"
+
+action: "Return all matching document records"
+
+occurrence: "C015_BR1"
+
+source_chunks: ["C015"]
+
+Imports
+This chunk imports `ClaimDocumentEntity` from the
+`com.acme.insurance.claims.entity` layer to represent the data model being
+accessed. It imports external Spring Data JPA interfaces and annotations
+(`JpaRepository`, `Repository`) which provide the capabilities to execute
+database operations. It imports standard Java `List`.
+
+Class-Level Declarations
+The `ClaimDocumentRepository` interface is annotated with `@Repository`,
+marking it as a data access component. It extends
+`JpaRepository<ClaimDocumentEntity, String>`, inheriting standard database
+operations for the `ClaimDocumentEntity` entity with a `String` primary key.
+
+Methods
+The `findByClaimRecord_ClaimId` method is declared to return a
+`List<ClaimDocumentEntity>`. It accepts a single parameter: a `String` named
+`claimId`. It has no implementation body; the Spring Data JPA framework
+automatically derives the query from the method signature, translating it into
+a database search that finds all document entities where the associated parent
+`ClaimRecord`'s `claimId` field exactly matches the provided input.

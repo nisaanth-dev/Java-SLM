@@ -1,0 +1,115 @@
+business_functional_name: |
+Claim Data Translation
+
+core_business_functionality: |
+Translates data between the format used for external communication and the
+internal database structure. Ensures safe mapping of attributes and safely
+extracts identifiers from related document records.
+
+business_function: 
+  - Converts incoming submission requests into internal database records.
+  - Safely handles missing or empty incoming requests.
+  - Converts internal database records into outbound response messages.
+  - Extracts lists of attached document identifiers from related records.
+  - Supplies empty lists when no supporting documents are attached.
+
+business_functions_list: 
+  - Convert Request
+  - Handle Missing Input
+  - Convert Record
+  - Extract Identifiers
+  - Supply Defaults
+
+business_rules: 
+  - rule_id: "C007_BR1"
+
+rule: "If an attempt is made to translate an empty claim submission, the translation process must safely abort and return no result."
+
+condition: "Input request is missing"
+
+action: "Return no result"
+
+occurrence: "C007_BR1"
+
+source_chunks: ["C007"]
+
+  - rule_id: "C007_BR2"
+
+rule: "When translating a claim record to an outbound message, if the record has attached documents, their specific identifiers must be extracted and included in the message."
+
+condition: "Claim record contains a list of attached documents"
+
+action: "Extract document identifiers and include them in the outbound message"
+
+occurrence: "C007_BR2"
+
+source_chunks: ["C007"]
+
+  - rule_id: "C007_BR3"
+
+rule: "When translating a claim record to an outbound message, if the record has no attached documents, the outbound message must explicitly indicate an empty list rather than omitting the data point."
+
+condition: "Claim record does not contain attached documents"
+
+action: "Provide an empty list of identifiers in the outbound message"
+
+occurrence: "C007_BR3"
+
+source_chunks: ["C007"]
+
+Imports
+This chunk imports ClaimSubmissionRequest and ClaimResponse from the
+com.acme.insurance.claims.dto layer, representing external communication
+structures. It imports ClaimRecord from the com.acme.insurance.claims.entity
+layer, representing the internal data structure. It imports the Spring
+Framework annotation @Component to register the class as an injectable bean.
+It imports standard Java Collectors and ArrayList for managing lists.
+
+Class-Level Declarations
+The ClaimEntityMapper class is annotated with @Component, marking it as a
+managed utility bean within the application context.
+
+Primary Flow: toEntity
+The toEntity method returns a ClaimRecord and accepts a ClaimSubmissionRequest
+named request.
+
+An if statement checks the defensive guard whether request is null. If this
+condition is true, the method returns null and terminates. If false, execution
+continues.
+
+The method declares a local variable record of type ClaimRecord initialized
+via object construction new ClaimRecord(). It sequentially maps fields by
+calling getter methods on the request and passing the results to the
+corresponding setter methods on the record: request.getPolicyNumber()
+populates record.setPolicyNumber(); request.getReporterId() populates
+record.setReporterId(); request.getIncidentDate() populates
+record.setIncidentDate(); request.getClaimAmount() populates
+record.setClaimAmount(); request.getIncidentDescription() populates
+record.setIncidentDescription(); and the boolean request.isExpedited()
+populates record.setExpedited(). Finally, the method returns the populated
+record object.
+
+Supporting Elements in This Chunk
+The toResponse method returns a ClaimResponse and accepts a ClaimRecord named
+entity.
+
+An if statement checks whether entity is null. If true, the method returns
+null and terminates. If false, execution continues.
+
+The method declares a local variable response of type ClaimResponse
+initialized via new ClaimResponse(). It populates response.setClaimId() with
+entity.getClaimId(), and response.setClaimStatus() with entity.getStatus().
+
+An if statement checks a compound condition: whether entity.getDocuments() is
+not null, AND whether the logical NOT of entity.getDocuments().isEmpty() is
+true. If this condition is true (documents exist), it populates the response
+by calling response.setAttachedDocumentIds(). The argument provided is the
+result of a stream operation: it opens a .stream() on entity.getDocuments(),
+applies a .map() lambda that extracts the identifier from each document via
+doc.getDocumentId(), and packages the results into a list via
+.collect(Collectors.toList()). If the condition is false (the else branch), it
+populates the response by calling response.setAttachedDocumentIds() with a new
+empty list via new ArrayList<>().
+
+After the branching logic concludes, the method returns the fully constructed
+response object.

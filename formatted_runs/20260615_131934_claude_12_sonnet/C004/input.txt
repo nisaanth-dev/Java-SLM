@@ -1,0 +1,90 @@
+CHUNK_ID: C004
+
+APPLICATION: Meridian Loan Origination Platform
+
+SERVICE: loan-origination-service
+
+FILE: f03 (com.meridianbank.loanorigination.entity.LoanApplication)
+
+LAYER: Entity
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.meridianbank.loanorigination.entity;
+
+import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.NoArgsConstructor;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "loan_application")
+@Getter
+@Setter
+@NoArgsConstructor
+public class LoanApplication {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id")
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "applicant_id", nullable = false)
+    private Applicant applicant;
+
+    @Column(name = "requested_amount", nullable = false, precision = 15, scale = 2)
+    private BigDecimal requestedAmount;
+
+    @Column(name = "approved_amount", precision = 15, scale = 2)
+    private BigDecimal approvedAmount;
+
+    @Column(name = "loan_purpose", length = 100)
+    private String loanPurpose;
+
+    @Column(name = "term_in_months", nullable = false)
+    private Integer termInMonths;
+
+    @Column(name = "status", nullable = false, length = 30)
+    private String status;
+
+    @Column(name = "rejection_reason", length = 255)
+    private String rejectionReason;
+
+    @Column(name = "credit_score_at_submission")
+    private Integer creditScoreAtSubmission;
+
+    @Column(name = "submitted_at", nullable = false)
+    private LocalDateTime submittedAt;
+
+    @Column(name = "decisioned_at")
+    private LocalDateTime decisionedAt;
+
+    @Column(name = "last_modified_at")
+    private LocalDateTime lastModifiedAt;
+
+    @PrePersist
+    protected void onCreate() {
+        this.lastModifiedAt = LocalDateTime.now();
+        if (this.status == null) {
+            this.status = "PENDING";
+        }
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        this.lastModifiedAt = LocalDateTime.now();
+    }
+
+    public boolean isHighValueRequest(BigDecimal threshold) {
+        if (this.requestedAmount == null || threshold == null) {
+            return false;
+        }
+        return this.requestedAmount.compareTo(threshold) > 0;
+    }
+}

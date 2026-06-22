@@ -1,0 +1,60 @@
+CHUNK_ID: C019
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f19 (com.acme.insurance.claims.service.impl.PaymentServiceImpl)
+
+LAYER: Service
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.acme.insurance.claims.service.impl;
+
+import com.acme.insurance.claims.dto.PaymentRequest;
+import com.acme.insurance.claims.service.PaymentService;
+import com.acme.insurance.claims.exception.ClaimSystemException;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.beans.factory.annotation.Value;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.math.BigDecimal;
+
+/**
+ * Handles communication with the external enterprise payment gateway.
+ */
+@Service
+public class PaymentServiceImpl implements PaymentService {
+
+    private static final Logger log = LoggerFactory.getLogger(PaymentServiceImpl.class);
+
+    private final RestTemplate externalServiceClient;
+    private final String paymentGatewayUrl;
+
+    public PaymentServiceImpl(RestTemplate externalServiceClient,
+                              @Value("${integration.payment.gateway.url}") String paymentGatewayUrl) {
+        this.externalServiceClient = externalServiceClient;
+        this.paymentGatewayUrl = paymentGatewayUrl;
+    }
+
+    @Override
+    public void initiatePayment(String claimId, BigDecimal amount) {
+        log.info("Initiating payment for claim {} for amount {}", claimId, amount);
+
+        PaymentRequest requestPayload = new PaymentRequest();
+        requestPayload.setClaimIdentifier(claimId);
+        requestPayload.setTotalAmount(amount);
+
+        try {
+            externalServiceClient.postForEntity(paymentGatewayUrl, requestPayload, String.class);
+            log.info("Payment successfully recorded by external gateway for claim {}", claimId);
+        } catch (Exception ex) {
+            log.error("Failed to communicate with payment gateway for claim {}", claimId, ex);
+            throw new ClaimSystemException("E_PAY_001", "External payment gateway integration failed", ex);
+        }
+    }
+}

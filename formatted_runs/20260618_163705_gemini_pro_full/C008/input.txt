@@ -1,0 +1,57 @@
+CHUNK_ID: C008
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f08 (com.acme.insurance.claims.config.IntegrationConfig)
+
+LAYER: Config
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.acme.insurance.claims.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.http.client.ClientHttpRequestInterceptor;
+import org.springframework.util.CollectionUtils;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Configuration class for external system integrations.
+ * Provisions HTTP clients with enforced timeout policies and security headers.
+ */
+@Configuration
+public class IntegrationConfig {
+
+    /**
+     * Configures the primary RestTemplate for synchronous external API calls.
+     */
+    @Bean
+    public RestTemplate externalServiceClient(RestTemplateBuilder builder) {
+        RestTemplate restTemplate = builder
+                .setConnectTimeout(Duration.ofSeconds(5))
+                .setReadTimeout(Duration.ofSeconds(15))
+                .build();
+
+        List<ClientHttpRequestInterceptor> interceptors = restTemplate.getInterceptors();
+        if (CollectionUtils.isEmpty(interceptors)) {
+            interceptors = new ArrayList<>();
+        }
+
+        interceptors.add((request, body, execution) -> {
+            request.getHeaders().add("X-System-Auth", "ACME_CLAIMS_INTERNAL");
+            return execution.execute(request, body);
+        });
+
+        restTemplate.setInterceptors(interceptors);
+        return restTemplate;
+    }
+}

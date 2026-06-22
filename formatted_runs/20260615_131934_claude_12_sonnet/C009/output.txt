@@ -1,0 +1,185 @@
+business_functional_name: |
+Loan Application Data Access And Custom Queries
+
+core_business_functionality: |
+This chunk defines how loan application records are retrieved from storage,
+including standard lookups by status or applicant, and specialized queries for
+finding stale pending applications, counting high-value approved loans, and
+finding an applicant's currently active applications. It serves as the
+persistence layer's contract for all loan application data access used
+elsewhere in the system.
+
+business_function: |
+Loan applications can be retrieved by their current status, regardless of
+letter casing.
+Loan applications can be retrieved for a specific applicant.
+Loan applications that have remained in a given status past a cutoff time can
+be retrieved.
+The number of high-value approved loans meeting or exceeding a minimum amount
+can be counted.
+An applicant's currently active pending applications can be retrieved.
+
+business_functions_list: 
+  - Retrieve By Status
+  - Retrieve By Applicant
+  - Identify Stale Applications
+  - Count High Value Loans
+  - Retrieve Active Applications
+
+business_rules: 
+  - rule_id: "C009_BR1"
+
+rule: "A loan application is considered stale for a given status if it has remained in that status since on or before a specified cutoff date and time."
+
+condition: "A loan application's status matches the given status and its submission time is on or before the cutoff time"
+
+action: "The loan application is included among the stale applications for that status"
+
+occurrence: "C009_BR1"
+
+source_chunks: ["C009"]
+
+  - rule_id: "C009_BR2"
+
+rule: "A high-value approved loan is one that has been approved and whose approved amount is at least equal to a specified minimum amount; the organization can determine how many such loans exist."
+
+condition: "A loan application's status is approved and its approved amount is at least the specified minimum amount"
+
+action: "The loan application is included in the count of high-value approved loans"
+
+occurrence: "C009_BR2"
+
+source_chunks: ["C009"]
+
+  - rule_id: "C009_BR3"
+
+rule: "An applicant's currently active applications are those that are either awaiting standard processing or awaiting manual review; applications in any other status are not considered active."
+
+condition: "A loan application belongs to the given applicant and its status is either pending or pending manual review"
+
+action: "The loan application is included among the applicant's active pending applications"
+
+occurrence: "C009_BR3"
+
+source_chunks: ["C009"]
+---
+
+This chunk's imports bring in classes from across the application. From the
+entity layer (com.meridianbank.loanorigination.entity), LoanApplication is
+imported as the persistent entity type this repository manages. From external
+libraries: org.springframework.data.jpa.repository.JpaRepository provides the
+base interface giving this repository standard create, read, update, and
+delete operations (including save, findById, and findAll used in the second
+and third chunks) for the LoanApplication entity with a primary key of type
+Long; org.springframework.data.jpa.repository.Query provides the annotation
+used to declare custom JPQL or native SQL queries on repository methods; and
+org.springframework.data.repository.query.Param provides the annotation used
+to bind named method parameters to named placeholders within a @Query
+annotation's query string. The imports java.math.BigDecimal,
+java.time.LocalDateTime, and java.util.List provide, respectively: the type
+used for the minimum-amount parameter in one of the queries, the type used for
+the cutoff timestamp parameter in another query, and the collection type
+returned by the multi-row queries.
+
+At the interface level, this interface extends JpaRepository<LoanApplication,
+Long>, which means it automatically inherits standard data access operations
+for the LoanApplication entity â including save (used in the second and
+third chunks to persist new and updated loan applications) and findById (used
+in the second and third chunks to retrieve a loan application by its
+identifier) and findAll (used in the second chunk when no status filter is
+provided) â without any of these inherited methods being declared explicitly
+in this chunk's code.
+
+This chunk declares five repository methods, each representing a distinct data
+access operation. As this is a purely declarative repository interface (no
+method bodies, no branching logic within this chunk itself), it is narrated
+structurally; however, each method's query semantics and parameters are
+described in full per the backend procedure / data access call coverage
+requirement, since these methods are the "backend procedures" being defined
+here.
+
+The method findByStatusIgnoreCase is declared returning List<LoanApplication>
+and takes one parameter, status, of type String. This is a Spring Data JPA
+derived-query method: its name is parsed by Spring Data to automatically
+generate a query that finds all LoanApplication records whose status field
+matches the given status value, ignoring letter casing. This method is called
+directly in the second chunk's findApplicationsByStatus method
+(loanApplicationRepository.findByStatusIgnoreCase(status.trim())), where its
+parameter is the trimmed status filter and its return value is the list of
+matching loan application entities, representing every loan application
+currently in the requested status regardless of how that status string was
+capitalized.
+
+The method findByApplicant_Id is declared returning List<LoanApplication> and
+takes one parameter, applicantId, of type Long. This is a Spring Data JPA
+derived-query method: the name findByApplicant_Id is parsed by Spring Data as
+traversing the applicant relationship on LoanApplication (declared in the
+fourth chunk) and matching on its id field, automatically generating a query
+that finds all LoanApplication records whose associated applicant's id equals
+the given applicantId. Its parameter applicantId represents the identifier of
+the applicant whose loan applications are being retrieved, and its return
+value is the list of all loan applications belonging to that applicant,
+representing that applicant's complete loan history.
+
+The method findStaleApplicationsByStatus is declared returning
+List<LoanApplication> and takes two parameters, status of type String
+(annotated with @Param("status")) and cutoff of type LocalDateTime (annotated
+with @Param("cutoff")). It is annotated with @Query("SELECT la FROM
+LoanApplication la WHERE la.status = :status AND la.submittedAt <= :cutoff"),
+a JPQL query that selects all LoanApplication entities (aliased as la) where
+the entity's status field equals the bound parameter :status (matched to the
+status method parameter via @Param("status")) AND the entity's submittedAt
+field is less than or equal to the bound parameter :cutoff (matched to the
+cutoff method parameter via @Param("cutoff")). In business terms, this query
+finds every loan application currently in the given status that was submitted
+on or before the given cutoff date and time â representing applications that
+have been sitting in that status for at least as long as the time elapsed
+since the cutoff. Its return value is the list of all such stale loan
+applications.
+
+The method countHighValueApprovedLoans is declared returning long and takes
+one parameter, minAmount, of type BigDecimal (annotated with
+@Param("minAmount")). It is annotated with @Query("SELECT COUNT(la) FROM
+LoanApplication la WHERE la.status = 'APPROVED' AND la.approvedAmount >=
+:minAmount"), a JPQL query that counts all LoanApplication entities (aliased
+as la) where the entity's status field equals the literal string 'APPROVED'
+AND the entity's approvedAmount field is greater than or equal to the bound
+parameter :minAmount (matched to the minAmount method parameter via
+@Param("minAmount")). In business terms, this query counts how many loan
+applications have been approved with an approved amount of at least minAmount
+â representing the count of high-value approved loans. Its return value is
+this count, as a long.
+
+The method findActivePendingApplicationsForApplicant is declared returning
+List<LoanApplication> and takes one parameter, applicantId, of type Long
+(annotated with @Param("applicantId")). It is annotated with @Query(value =
+"SELECT * FROM loan_application WHERE applicant_id = :applicantId AND status
+IN ('PENDING', 'PENDING_MANUAL_REVIEW')", nativeQuery = true), a native SQL
+query (operating directly on the underlying loan_application table, as named
+in the fourth chunk's @Table annotation, rather than via JPQL entity names)
+that selects all columns from the loan_application table where the
+applicant_id column equals the bound parameter :applicantId (matched to the
+applicantId method parameter via @Param("applicantId")) AND the status column
+is one of the literal values 'PENDING' or 'PENDING_MANUAL_REVIEW'. In business
+terms, this query finds all of a given applicant's loan applications that are
+currently active â meaning either awaiting standard processing or awaiting
+manual review â excluding applications that have been approved, rejected, or
+cancelled. Its return value is the list of all such active pending loan
+applications for that applicant.
+
+## Supporting Elements in This Chunk
+
+As this chunk is a repository interface declaring only method signatures (with
+two annotated with custom @Query definitions and three relying on Spring
+Data's derived-query mechanism or inherited base methods), there is no single
+"primary flow" method in the execution-trace sense â each of the five
+declared methods, plus the inherited save/findById/findAll/etc. from
+JpaRepository, represents an independently-callable data access operation. All
+five declared methods have been fully narrated above, including their
+parameters, query semantics, and return values; none remain unreached. This
+section is included to confirm no additional unreached elements exist. Note
+that findByStatusIgnoreCase and findByApplicant_Id, while declared without
+bodies (per Spring Data JPA convention, where the implementation is generated
+automatically from the method name at runtime), have nonetheless been fully
+described in terms of their derived query behavior, parameters, and return
+values, satisfying the backend procedure / data access coverage requirement.

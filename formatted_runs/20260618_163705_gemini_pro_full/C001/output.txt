@@ -1,0 +1,257 @@
+business_functional_name: |
+Claim Ingestion And Status Management
+
+core_business_functionality: |
+Handles the intake of new insurance claims and validates their initial receipt
+from source systems. Retrieves the real-time processing status of existing
+claims and manages the addition of supplementary claim documentation.
+
+business_function: 
+  - Validates incoming claim submissions.
+  - Routes valid claims for processing.
+  - Retrieves current claim processing status.
+  - Accepts supplementary claim documents.
+  - Processes bulk claim submissions.
+
+business_functions_list: 
+  - Validate Submission
+  - Route Claim
+  - Retrieve Status
+  - Update Documents
+  - Process Batch
+
+business_rules: 
+  - rule_id: "C001_BR1"
+
+rule: "If a claim submission does not contain any data, the submission is rejected immediately as a bad request."
+
+condition: "Claim submission data is completely missing"
+
+action: "Reject the submission"
+
+occurrence: "C001_BR1"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR2"
+
+rule: "If a newly submitted claim is evaluated and rejected by the processing rules, it is returned with an unprocessable status."
+
+condition: "Claim evaluation results in a rejected status"
+
+action: "Return unprocessable status with claim details"
+
+occurrence: "C001_BR2"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR3"
+
+rule: "If a newly submitted claim requires additional documents to proceed, it is accepted but placed in a pending documents status."
+
+condition: "Claim evaluation results in a pending documents status"
+
+action: "Return accepted status with claim details"
+
+occurrence: "C001_BR3"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR4"
+
+rule: "If a claim status inquiry is missing a claim identifier, or if the identifier is shorter than five characters, the inquiry is rejected."
+
+condition: "Claim identifier is missing or excessively short"
+
+action: "Reject the status inquiry"
+
+occurrence: "C001_BR4"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR5"
+
+rule: "If an attempt is made to submit a batch of claims containing more than fifty records at once, the entire batch is rejected for exceeding limits."
+
+condition: "Bulk submission contains more than fifty records"
+
+action: "Reject the entire batch"
+
+occurrence: "C001_BR5"
+
+source_chunks: ["C001"]
+
+Imports
+This chunk imports `ClaimSubmissionRequest`, `ClaimResponse`, and
+`DocumentUpdateRequest` from the `com.acme.insurance.claims.dto` layer,
+representing the data transfer objects used for request and response payloads.
+It imports `ClaimProcessingService` from the
+`com.acme.insurance.claims.service` layer, which serves as the core business
+logic dependency for claim operations. It imports external Spring Framework
+annotations and classes (`HttpStatus`, `ResponseEntity`, `PostMapping`,
+`GetMapping`, `PatchMapping`, `RequestBody`, `PathVariable`, `RestController`,
+`RequestMapping`, `RequestHeader`) which provide the capabilities to expose
+and route HTTP REST endpoints. It imports SLF4J `Logger` and `LoggerFactory`
+for logging capabilities, `jakarta.validation.Valid` to enforce bean
+validation on incoming payloads, and standard Java `List` and `ArrayList` for
+collection management.
+
+Class-Level Declarations
+The `ClaimController` class is marked with the `@RestController` annotation,
+indicating it handles REST HTTP requests, and
+`@RequestMapping("/api/v1/claims")`, setting the base URI path for all
+endpoints in this class. It declares a constant `Logger` named `log`. It
+declares a private, final injected dependency `claimProcessingService` of type
+`ClaimProcessingService`. A constructor accepts this dependency and
+initializes the field.
+
+Primary Flow: submitClaim
+The `submitClaim` method is exposed via the `@PostMapping("/submit")`
+annotation. It returns a `ResponseEntity<ClaimResponse>` and accepts two
+parameters: a `ClaimSubmissionRequest` named `request` annotated with `@Valid`
+and `@RequestBody` to map and validate the incoming JSON body, and a `String`
+named `sourceSystem` bound to the HTTP header `X-Source-System` via the
+`@RequestHeader` annotation, which defaults to the literal value `"WEB"` if
+absent.
+
+The method begins by logging the received claim submission and the
+`sourceSystem`. An `if` statement checks whether the `request` parameter is
+`null`. If this condition is true, the method logs a warning that the payload
+is null, immediately returns a `ResponseEntity` built with
+`HttpStatus.BAD_REQUEST`, and terminates further execution. If the condition
+is false, execution continues to the next statement.
+
+The method declares a local variable `response` of type `ClaimResponse`. It
+assigns this variable the return value of an external method call to
+`claimProcessingService.processNewClaim(request, sourceSystem)`. Control
+transfers out to this service method, passing the parsed request and source
+system identifier, and returns to this point with the processed result.
+
+An `if` statement checks two conditions combined with a logical AND: whether
+`response.getClaimStatus()` is not `null`, and whether
+`response.getClaimStatus().equals("REJECTED")`. If this condition is true, the
+method logs that the claim was rejected automatically, returns a
+`ResponseEntity` constructed with `HttpStatus.UNPROCESSABLE_ENTITY` containing
+the `response` object in its body, and terminates. If the condition is false,
+execution continues.
+
+A subsequent `if` statement checks whether `response.getClaimStatus()` is not
+`null` and whether `response.getClaimStatus().equals("PENDING_DOCUMENTS")`. If
+this condition is true, the method logs that the claim requires documentation,
+returns a `ResponseEntity` constructed with `HttpStatus.ACCEPTED` containing
+the `response` body, and terminates. If the condition is false, execution
+continues.
+
+Finally, the method logs that the claim submission was created successfully
+using `response.getClaimId()`, and returns a `ResponseEntity` constructed with
+`HttpStatus.CREATED` containing the `response` body.
+
+Primary Flow: getClaimStatus
+The `getClaimStatus` method is exposed via the
+`@GetMapping("/{claimId}/status")` annotation. It returns a
+`ResponseEntity<ClaimResponse>` and accepts a single parameter: a `String`
+named `claimId`, bound to the URI path variable `claimId` via the
+`@PathVariable` annotation.
+
+The method logs the fetching action for the `claimId`. An `if` statement
+checks whether `claimId` is `null` or if `claimId.trim().isEmpty()` evaluates
+to true. If this condition is true, the method logs an error regarding a null
+or empty ID, returns a `ResponseEntity` built with `HttpStatus.BAD_REQUEST`,
+and terminates. If false, execution continues.
+
+A second `if` statement checks whether `claimId.length() < 5`. If this
+condition is true, the method logs a warning about a short ID, returns a
+`ResponseEntity` built with `HttpStatus.BAD_REQUEST`, and terminates. If
+false, execution continues.
+
+The method declares a local variable `response` of type `ClaimResponse`. It
+assigns this variable the return value of an external method call to
+`claimProcessingService.retrieveClaimStatus(claimId)`. Control transfers out
+to the service and returns to this point.
+
+An `if` statement checks whether `response` is `null`. If true, the method
+logs that no claim was found, returns a `ResponseEntity` built with
+`HttpStatus.NOT_FOUND`, and terminates. If false, execution continues.
+
+The method logs a successful retrieval debug message and returns
+`ResponseEntity.ok(response)`.
+
+Primary Flow: updateClaimDocuments
+The `updateClaimDocuments` method is exposed via the
+`@PatchMapping("/{claimId}/documents")` annotation. It returns a
+`ResponseEntity<ClaimResponse>` and accepts two parameters: a `String` named
+`claimId` mapped via `@PathVariable`, and a `DocumentUpdateRequest` named
+`documentRequest` mapped via `@Valid` and `@RequestBody`.
+
+The method logs the received update request. An `if` statement checks whether
+`claimId` is `null` or if `claimId.trim().isEmpty()` is true. If true, it logs
+an error, returns a `ResponseEntity` with `HttpStatus.BAD_REQUEST`, and
+terminates. If false, execution continues.
+
+An `if` statement checks whether `documentRequest` is `null`. If true, it logs
+an error, returns a `ResponseEntity` with `HttpStatus.BAD_REQUEST`, and
+terminates. If false, execution continues.
+
+The method declares a `List<String>` named `documentIds` and assigns it the
+result of `documentRequest.getDocumentIds()`. An `if` statement checks whether
+`documentIds` is `null` or `documentIds.isEmpty()`. If true, it logs a
+warning, returns a `ResponseEntity` with `HttpStatus.BAD_REQUEST`, and
+terminates. If false, execution continues.
+
+The method declares a local variable `response` of type `ClaimResponse` and
+assigns it the return value of the external method call
+`claimProcessingService.appendDocumentsToClaim(claimId, documentIds)`. Control
+transfers out to the service and returns.
+
+An `if` statement checks whether `response` is `null`. If true, it logs an
+error, returns a `ResponseEntity` with `HttpStatus.NOT_FOUND`, and terminates.
+If false, execution continues.
+
+The method logs success and returns `ResponseEntity.ok(response)`.
+
+Primary Flow: submitBulkClaims
+The `submitBulkClaims` method is exposed via the `@PostMapping("/submit-
+bulk")` annotation. It returns a `ResponseEntity<List<ClaimResponse>>` and
+accepts two parameters: a `List<ClaimSubmissionRequest>` named `requests`
+mapped via `@Valid` and `@RequestBody`, and a `String` named `sourceSystem`
+mapped via `@RequestHeader` defaulting to the literal `"BATCH_PROC"`.
+
+The method logs the receipt of the bulk claim, calculating the size using an
+inline ternary check. An `if` statement checks whether `requests` is `null` or
+`requests.isEmpty()`. If true, it logs an error, returns a `ResponseEntity`
+with `HttpStatus.BAD_REQUEST`, and terminates. If false, execution continues.
+
+An `if` statement checks whether `requests.size() > 50`. If true, it logs a
+warning, returns a `ResponseEntity` with `HttpStatus.PAYLOAD_TOO_LARGE`, and
+terminates. If false, execution continues.
+
+The method declares a `List<ClaimResponse>` named `responses` initialized to a
+new `ArrayList<>()`, and an `int` named `failureCount` initialized to `0`.
+
+A `for` loop iterates over each `ClaimSubmissionRequest` (aliased as `req`)
+within the `requests` list. Inside the loop, a `try / catch` block wraps the
+processing logic.
+Inside the `try` block, a local variable `response` of type `ClaimResponse` is
+assigned the return value of the external call
+`claimProcessingService.processNewClaim(req, sourceSystem)`. Control transfers
+out and returns. The method adds `response` to the `responses` list. An `if`
+statement checks whether the literal `"REJECTED"` equals
+`response.getClaimStatus()`. If true, `failureCount` is incremented by one. If
+false, the `if` block is bypassed.
+The `catch` block captures any `Exception` named `ex`. The business condition
+triggering this block is any unhandled system exception during individual
+claim processing. In response, the catch block logs the error, increments
+`failureCount` by one, instantiates a new `ClaimResponse` object named
+`errorResponse`, sets its status to the literal `"SYSTEM_ERROR"` via
+`errorResponse.setClaimStatus("SYSTEM_ERROR")`, and adds `errorResponse` to
+the `responses` list. The business outcome is that processing continues to the
+next record in the loop without failing the entire batch.
+
+After the loop terminates, the method logs the total failures. An `if`
+statement checks whether `failureCount == requests.size()`. If true, it
+returns a `ResponseEntity` with `HttpStatus.UNPROCESSABLE_ENTITY` containing
+the `responses` list, and terminates. If false, an `else if` statement checks
+whether `failureCount > 0`. If this is true, it returns a `ResponseEntity`
+with `HttpStatus.MULTI_STATUS` containing the `responses` list, and
+terminates. If false (meaning all succeeded), it returns a `ResponseEntity`
+with `HttpStatus.CREATED` containing the `responses` list.

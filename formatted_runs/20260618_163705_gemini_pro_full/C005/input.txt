@@ -1,0 +1,45 @@
+CHUNK_ID: C005
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f05 (com.acme.insurance.claims.repository.ClaimRepository)
+
+LAYER: Repository
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.acme.insurance.claims.repository;
+
+import com.acme.insurance.claims.entity.ClaimRecord;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+import java.time.LocalDateTime;
+import java.util.List;
+
+/**
+ * Data access layer for claim records.
+ * Provides standard CRUD operations and custom state-transition queries.
+ */
+@Repository
+public interface ClaimRepository extends JpaRepository<ClaimRecord, String> {
+
+    /**
+     * Identifies claims that have remained in a specific status beyond a given cutoff.
+     */
+    @Query("SELECT c FROM ClaimRecord c WHERE c.status = :status AND c.createdAt < :cutoffDate")
+    List<ClaimRecord> findStaleClaimsByStatus(@Param("status") String status, @Param("cutoffDate") LocalDateTime cutoffDate);
+
+    /**
+     * Atomically transitions a claim to a new status only if it is currently in the expected state.
+     */
+    @Modifying
+    @Query("UPDATE ClaimRecord c SET c.status = :newStatus, c.updatedAt = CURRENT_TIMESTAMP WHERE c.claimId = :claimId AND c.status = :expectedOldStatus")
+    int transitionClaimStatus(@Param("claimId") String claimId, @Param("expectedOldStatus") String expectedOldStatus, @Param("newStatus") String newStatus);
+}

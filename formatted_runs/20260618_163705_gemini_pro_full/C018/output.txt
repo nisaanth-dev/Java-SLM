@@ -1,0 +1,49 @@
+business_functional_name: |
+Payment Transaction Payload
+
+core_business_functionality: |
+Defines the data structure sent to external financial gateways to disburse
+funds for approved claims. Standardizes the monetary values and enforces a
+default currency.
+
+business_function: 
+  - Formats the claim identifier for external financial processing.
+  - Formats the exact monetary value to be disbursed.
+  - Assigns a default currency to the transaction.
+
+business_functions_list: 
+  - Format Identifier
+  - Format Amount
+  - Assign Currency
+
+business_rules: 
+  - rule_id: "C018_BR1"
+
+rule: "All outgoing financial payment requests must default to processing in United States Dollars unless explicitly overridden."
+
+condition: "A payment request is generated"
+
+action: "Assign currency code to USD"
+
+occurrence: "C018_BR1"
+
+source_chunks: ["C018"]
+
+Imports
+This chunk imports Jackson's `@JsonProperty` to define the JSON serialization
+output mapping. It imports Lombok's `@Data`, `@NoArgsConstructor`, and
+`@AllArgsConstructor` to generate standard accessors and object constructors.
+It imports standard Java `BigDecimal` for precise monetary arithmetic.
+
+Class-Level Declarations
+The `PaymentRequest` class is annotated with `@Data`, `@NoArgsConstructor`,
+and `@AllArgsConstructor` to generate boilerplate methods.
+
+Fields
+The class declares the following fields:
+
+  - `claimIdentifier`: A `String` representing the associated claim. It is mapped to the JSON key `"claim_identifier"` via `@JsonProperty`.
+
+  - `totalAmount`: A `BigDecimal` representing the exact monetary value to be paid out. It is mapped to the JSON key `"total_amount"` via `@JsonProperty`.
+
+  - `currencyCode`: A `String` representing the financial currency. It is initialized to the literal value `"USD"`. It is mapped to the JSON key `"currency_code"` via `@JsonProperty`.

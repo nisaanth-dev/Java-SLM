@@ -1,0 +1,178 @@
+business_functional_name: |
+External Connectivity And Event Channel Setup
+
+core_business_functionality: |
+This chunk establishes the connections the application uses to reach the
+external credit bureau service and to publish loan-related events to the
+messaging system. It defines the timeouts, addresses, and delivery guarantees
+governing both of these external communication channels.
+
+business_function: |
+A connection to the external credit bureau service is configured with defined
+timeouts.
+A channel for publishing loan-related events to the messaging system is
+configured.
+Event publishing is configured to require acknowledgment and to retry on
+failure.
+
+business_functions_list: 
+  - Configure Credit Bureau Connection
+  - Configure Event Publishing Channel
+  - Ensure Delivery Guarantees
+
+business_rules: 
+  - rule_id: "C011_BR1"
+
+rule: "A request to the external credit bureau service that takes too long to connect or too long to respond is abandoned rather than waited on indefinitely."
+
+condition: "A connection to the credit bureau service takes longer than 5 seconds to establish, or a response takes longer than 10 seconds to receive"
+
+action: "The credit bureau request is abandoned due to timeout"
+
+occurrence: "C011_BR1"
+
+source_chunks: ["C011"]
+
+  - rule_id: "C011_BR2"
+
+rule: "When a loan-related event is published, the system requires confirmation that it was received before considering it sent, and will attempt to resend it up to 3 times if it is not initially acknowledged."
+
+condition: "A loan-related event is being published to the messaging system"
+
+action: "The publishing operation waits for full acknowledgment and retries up to 3 times if needed"
+
+occurrence: "C011_BR2"
+
+source_chunks: ["C011"]
+---
+
+This chunk's imports provide the following capabilities.
+org.apache.kafka.clients.producer.ProducerConfig provides the set of
+configuration key constants (BOOTSTRAP_SERVERS_CONFIG,
+KEY_SERIALIZER_CLASS_CONFIG, VALUE_SERIALIZER_CLASS_CONFIG, ACKS_CONFIG,
+RETRIES_CONFIG) used to configure a Kafka producer.
+org.apache.kafka.common.serialization.StringSerializer provides the serializer
+class used to convert message keys to bytes for transmission to Kafka.
+org.springframework.boot.web.client.RestTemplateBuilder provides a builder
+used to construct a configured RestTemplate instance.
+org.springframework.context.annotation.Bean provides the annotation marking a
+method's return value as a Spring-managed bean to be registered in the
+application context. org.springframework.context.annotation.Configuration
+provides the annotation marking this class as a source of bean definitions for
+the Spring application context.
+org.springframework.kafka.core.DefaultKafkaProducerFactory provides the
+default implementation used to create Kafka producer instances from a
+configuration map. org.springframework.kafka.core.KafkaTemplate provides the
+high-level abstraction used to send messages to Kafka topics (used by the
+event publisher in a later chunk).
+org.springframework.kafka.core.ProducerFactory provides the interface type for
+the bean that creates Kafka producers.
+org.springframework.kafka.support.serializer.JsonSerializer provides the
+serializer class used to convert message values to JSON bytes for transmission
+to Kafka. org.springframework.web.client.RestTemplate provides the class used
+to make synchronous HTTP calls to external services (used by the credit bureau
+client). The imports java.time.Duration, java.util.HashMap, and java.util.Map
+provide, respectively: the type used to express the connection and read
+timeout durations, and the map implementation and interface used to hold Kafka
+producer configuration properties.
+
+At the class level, the class is annotated with @Configuration, marking it as
+a source of bean definitions that will be processed by the Spring container at
+application startup to register the beans produced by its @Bean-annotated
+methods.
+
+The class declares a private static final field named KAFKA_BOOTSTRAP_SERVERS
+of type String, initialized to the literal value "kafka-broker-01:9092,kafka-
+broker-02:9092". This constant represents the network addresses of the Kafka
+broker instances the application connects to in order to publish events,
+specifying two brokers for redundancy.
+
+The method creditBureauRestTemplate is declared as public, returns
+RestTemplate, is annotated with @Bean (registering its return value as a
+Spring bean named creditBureauRestTemplate, available for injection â this
+is the type of the creditBureauClient... related dependency referenced in the
+second chunk, representing the external credit bureau integration), and takes
+one parameter, builder, of type RestTemplateBuilder, supplied automatically by
+Spring as an auto-configured builder bean. Its single statement returns the
+result of a builder chain: builder.rootUri("https://api.creditbureau-
+partner.com") configures the base URL all requests made through the resulting
+RestTemplate will be relative to, representing the address of the external
+credit bureau partner's API; .setConnectTimeout(Duration.ofSeconds(5))
+configures the maximum time to wait while establishing a connection to that
+service to 5 seconds, representing the business policy that a connection
+attempt to the credit bureau that takes longer than 5 seconds is abandoned;
+.setReadTimeout(Duration.ofSeconds(10)) configures the maximum time to wait
+for a response after the connection is established to 10 seconds, representing
+the business policy that a credit bureau request that does not respond within
+10 seconds is abandoned; and .build() constructs and returns the fully
+configured RestTemplate instance. This returned RestTemplate is registered as
+a Spring bean and represents the configured connection point through which the
+application communicates with the external credit bureau service.
+
+The method loanEventProducerFactory is declared as public, returns
+ProducerFactory<String, Object>, is annotated with @Bean (registering its
+return value as a Spring bean named loanEventProducerFactory), and takes no
+parameters.
+
+The first statement declares a local variable named configProps of type
+Map<String, Object>, assigned the result of new HashMap<>() â constructing a
+new, empty map that will hold Kafka producer configuration properties.
+
+The following five statements each call configProps.put(...) to populate this
+map with a configuration key-value pair:
+configProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
+KAFKA_BOOTSTRAP_SERVERS) sets the bootstrap servers configuration to the value
+of the KAFKA_BOOTSTRAP_SERVERS constant ("kafka-broker-01:9092,kafka-
+broker-02:9092"), specifying which Kafka brokers the producer will connect to;
+configProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
+StringSerializer.class) sets the key serializer to StringSerializer,
+specifying that message keys will be serialized as plain strings;
+configProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
+JsonSerializer.class) sets the value serializer to JsonSerializer, specifying
+that message bodies (representing event payloads) will be serialized as JSON;
+configProps.put(ProducerConfig.ACKS_CONFIG, "all") sets the acknowledgment
+configuration to the literal string "all", specifying that the producer waits
+for the message to be fully acknowledged by all in-sync replicas before
+considering the send successful, representing the business policy that loan
+event delivery is confirmed rather than fire-and-forget; and
+configProps.put(ProducerConfig.RETRIES_CONFIG, 3) sets the retries
+configuration to the literal integer 3, specifying that the producer will
+retry sending a message up to 3 times if the initial send attempt fails.
+
+The final statement returns the result of new
+DefaultKafkaProducerFactory<>(configProps) â constructing a new Kafka
+producer factory initialized with the populated configProps map, and returning
+it as the method's result. This factory is registered as a Spring bean and
+represents the configured mechanism for creating Kafka producers used to
+publish loan-related events.
+
+The method loanEventKafkaTemplate is declared as public, returns
+KafkaTemplate<String, Object>, is annotated with @Bean (registering its return
+value as a Spring bean named loanEventKafkaTemplate â this is the bean type
+underlying the loanDecisionEventPublisher dependency referenced in the third
+chunk's recordDecision method), and takes one parameter,
+loanEventProducerFactory, of type ProducerFactory<String, Object>, supplied
+automatically by Spring by injecting the bean produced by the
+loanEventProducerFactory method described above. Its single statement returns
+the result of new KafkaTemplate<>(loanEventProducerFactory) â constructing a
+new KafkaTemplate wrapping the given producer factory, and returning it as the
+method's result. This template is registered as a Spring bean and represents
+the high-level interface through which loan-related events (such as the loan-
+approved event published in the third chunk) are sent to Kafka topics.
+
+## Supporting Elements in This Chunk
+
+All three @Bean-producing methods (creditBureauRestTemplate,
+loanEventProducerFactory, loanEventKafkaTemplate) and the single constant
+field (KAFKA_BOOTSTRAP_SERVERS) have been fully narrated above;
+KAFKA_BOOTSTRAP_SERVERS is used within loanEventProducerFactory and is not
+left unreached. There is a dependency relationship between two of the beans:
+loanEventKafkaTemplate depends on the bean produced by
+loanEventProducerFactory, which itself depends on the configProps map built
+using KAFKA_BOOTSTRAP_SERVERS â this chain has been described in the order
+presented. No additional unreached elements exist in this chunk. No exception
+handling is present in this chunk; bean construction failures (e.g., if the
+Kafka brokers are unreachable at startup) are not handled here and would
+surface as application startup failures, which is an absence of error handling
+at this layer by design, as configuration classes typically delegate
+connection-time error handling to the components that use these beans.

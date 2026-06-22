@@ -1,0 +1,100 @@
+business_functional_name: |
+Loan Application And Decision Output Structures
+
+core_business_functionality: |
+This chunk defines the information returned to callers about a loan
+application's full details and about the outcome of a decision made on a loan
+application. It provides a complete snapshot of an application's state and a
+focused summary of a status change resulting from a decision.
+
+business_function: |
+A loan application's full details can be returned, including applicant,
+financial, status, and timing information.
+A decision outcome can be returned, summarizing the application's status
+before and after the decision along with when it occurred.
+
+business_functions_list: 
+  - Present Application Details
+  - Present Decision Outcome
+
+business_rules: 
+  - rule_id: "C007_BR1"
+
+rule: "Not expressible as a pure business rule from available input â requires business context to complete."
+
+condition: "Not expressible as a pure business rule from available input â requires business context to complete."
+
+action: "Not expressible as a pure business rule from available input â requires business context to complete."
+
+occurrence: "C007_BR1"
+
+source_chunks: ["C007"]
+---
+
+This chunk's imports provide the following capabilities. lombok.Getter and
+lombok.Setter provide automatically generated getter and setter methods for
+every field in both classes declared in this chunk. java.math.BigDecimal
+provides the type used for monetary amount fields, and java.time.LocalDateTime
+provides the type used for timestamp fields.
+
+This chunk contains two top-level classes, each carrying its own @Getter and
+@Setter (Lombok) annotations at the class level, generating getter and setter
+methods for every field declared within that class.
+
+The first class, LoanApplicationResponse, declares twelve fields, all without
+any validation or persistence annotations (this is a plain output structure).
+The field id is of type Long, representing the unique identifier of the loan
+application â corresponding to the savedApplication.getId() value populated
+by the mapper from the LoanApplication entity's id field (third chunk's
+entity). The field applicantId is of type Long, representing the identifier of
+the applicant who submitted this application. The field applicantFullName is
+of type String, representing the full name of the applicant, presumably
+populated from the associated Applicant entity's fullName field (fifth chunk)
+by the mapper. The field requestedAmount is of type BigDecimal, representing
+the amount the applicant requested to borrow. The field approvedAmount is of
+type BigDecimal, representing the amount approved for this loan, populated
+once a decision of approval has been recorded (as set in the third chunk's
+recordDecision method). The field loanPurpose is of type String, representing
+the stated reason for the loan. The field termInMonths is of type Integer,
+representing the requested repayment term in months. The field status is of
+type String, representing the application's current processing status (e.g.,
+"PENDING", "APPROVED", "REJECTED", "PENDING_MANUAL_REVIEW", "CANCELLED"). The
+field rejectionReason is of type String, representing the explanation recorded
+if the application was rejected. The field creditScoreAtSubmission is of type
+Integer, representing the applicant's credit score as captured at the time of
+submission. The field submittedAt is of type LocalDateTime, representing when
+the application was originally submitted. The field decisionedAt is of type
+LocalDateTime, representing when a final decision (approval or rejection) was
+recorded, which may be null if no such decision has occurred.
+
+The second class, LoanDecisionResponse, declares four fields. The field
+applicationId is of type Long, representing the identifier of the loan
+application that was decided â populated from updatedApplication.getId() in
+the third chunk's recordDecision method. The field previousStatus is of type
+String, representing the application's status immediately before this decision
+was applied â populated from the previousStatus local variable captured in
+the third chunk's recordDecision method before its switch statement executed.
+The field newStatus is of type String, representing the application's status
+immediately after this decision was applied â populated from
+updatedApplication.getStatus() in the third chunk, reflecting whichever branch
+of the switch statement (APPROVED, REJECTED, or PENDING_MANUAL_REVIEW) was
+taken. The field decisionedAt is of type LocalDateTime, representing the date
+and time the decision was recorded â populated from
+updatedApplication.getDecisionedAt() in the third chunk, which will be null if
+the MANUAL_REVIEW case was taken (since that case does not set a decision
+timestamp).
+
+## Supporting Elements in This Chunk
+
+Both classes declare no constructors beyond the implicit default constructor,
+and no methods beyond the Lombok-generated getters and setters implied by
+@Getter and @Setter on each class. All sixteen fields across the two classes
+(twelve on LoanApplicationResponse, four on LoanDecisionResponse) are
+described in the structural walkthrough above; none remain unreached. This
+section is included to confirm no additional unreached elements exist. Note
+that because these are pure output DTOs with no validation, persistence, or
+conditional logic of any kind, the business rule for this chunk is recorded as
+not expressible from available input per the Business Rule Purity Mandate â
+the actual population logic and any conditions governing which fields are set
+under which circumstances belong to the mapper and service chunks rather than
+to this structural definition.

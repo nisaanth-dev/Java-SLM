@@ -1,0 +1,75 @@
+CHUNK_ID: C013
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f13 (com.acme.insurance.claims.controller.AdminController)
+
+LAYER: Controller
+
+ENTRY_POINT: yes
+
+=== CODE ===
+
+package com.acme.insurance.claims.controller;
+
+import com.acme.insurance.claims.dto.ClaimResponse;
+import com.acme.insurance.claims.service.ClaimRoutingService;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Administrative endpoints for manual claim overrides.
+ */
+@RestController
+@RequestMapping("/api/v1/admin/claims")
+public class AdminController {
+
+    private static final Logger log = LoggerFactory.getLogger(AdminController.class);
+    private final ClaimRoutingService claimRoutingService;
+
+    public AdminController(ClaimRoutingService claimRoutingService) {
+        this.claimRoutingService = claimRoutingService;
+    }
+
+    /**
+     * Manually forces a claim into an approved state.
+     */
+    @PutMapping("/{claimId}/approve")
+    public ResponseEntity<ClaimResponse> approveClaim(@PathVariable("claimId") String claimId) {
+        log.info("Manual approval triggered for claim ID: {}", claimId);
+
+        if (claimId == null || claimId.trim().isEmpty()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+
+        ClaimResponse response = claimRoutingService.forceApprove(claimId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Manually rejects a claim with a specific reason.
+     */
+    @PutMapping("/{claimId}/reject")
+    public ResponseEntity<ClaimResponse> rejectClaim(
+            @PathVariable("claimId") String claimId,
+            @RequestParam("reason") String reason) {
+
+        log.info("Manual rejection triggered for claim ID: {} with reason: {}", claimId, reason);
+
+        if (claimId == null || claimId.trim().isEmpty() || reason == null || reason.trim().isEmpty()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+
+        ClaimResponse response = claimRoutingService.forceReject(claimId, reason);
+        return ResponseEntity.ok(response);
+    }
+}

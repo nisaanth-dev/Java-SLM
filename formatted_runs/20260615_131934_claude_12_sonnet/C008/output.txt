@@ -1,0 +1,140 @@
+business_functional_name: |
+Loan Application Entity To Response Conversion
+
+core_business_functionality: |
+This chunk converts a stored loan application record into the output format
+returned to callers, copying across all of its financial, status, and timing
+details. It also includes the linked applicant's identity, falling back to a
+placeholder if no applicant is associated with the record.
+
+business_function: |
+A stored loan application is converted into its output representation.
+The associated applicant's identifier and name are included when an applicant
+is linked.
+A placeholder applicant identity is used when no applicant is linked to the
+application.
+
+business_functions_list: 
+  - Convert Application Record
+  - Include Applicant Identity
+  - Apply Unknown Applicant Fallback
+
+business_rules: 
+  - rule_id: "C008_BR1"
+
+rule: "When presenting a loan application's details, if the application has a linked applicant, that applicant's identifier and full name are included in the presented details."
+
+condition: "The loan application has an associated applicant"
+
+action: "The applicant's identifier and full name are included in the application's presented details"
+
+occurrence: "C008_BR1"
+
+source_chunks: ["C008"]
+
+  - rule_id: "C008_BR2"
+
+rule: "When presenting a loan application's details, if the application has no linked applicant, the applicant identifier is left empty and the applicant name is shown as unknown."
+
+condition: "The loan application has no associated applicant"
+
+action: "The presented details show no applicant identifier and an applicant name of unknown"
+
+occurrence: "C008_BR2"
+
+source_chunks: ["C008"]
+---
+
+This chunk's imports bring in classes from across the application. From the
+dto layer (com.meridianbank.loanorigination.dto), LoanApplicationResponse is
+imported as the output structure this mapper produces. From the entity layer
+(com.meridianbank.loanorigination.entity), Applicant is imported as the type
+of the associated applicant entity that may be linked to a loan application,
+and LoanApplication is imported as the persistent record type this mapper
+converts from. From an external library,
+org.springframework.stereotype.Component provides the annotation marking this
+class as a generic Spring-managed bean, making it available for injection (as
+seen in the loanApplicationMapper dependency injected into the service in the
+second chunk).
+
+At the class level, the class is annotated with @Component, marking it as a
+Spring-managed bean eligible for dependency injection.
+
+This class declares no fields.
+
+The primary flow of this chunk is the toResponse method, as it is the chunk's
+only method and the operation called repeatedly by the service in the second
+and third chunks (via loanApplicationMapper.toResponse(...) and
+loanApplicationMapper::toResponse).
+
+The method toResponse is declared as public, returns a
+LoanApplicationResponse, and takes one parameter, loanApplication, of type
+LoanApplication, representing the stored loan application record to be
+converted into its output representation.
+
+The first statement declares a local variable named response of type
+LoanApplicationResponse, assigned the result of new LoanApplicationResponse()
+â constructing a new, empty response object that will be populated field by
+field.
+
+The following ten statements call setter methods on response, each copying one
+field's value directly from loanApplication via its corresponding getter:
+response.setId(loanApplication.getId()) copies the application's unique
+identifier; response.setRequestedAmount(loanApplication.getRequestedAmount())
+copies the requested loan amount;
+response.setApprovedAmount(loanApplication.getApprovedAmount()) copies the
+approved loan amount (which may be null if no approval has occurred);
+response.setLoanPurpose(loanApplication.getLoanPurpose()) copies the stated
+loan purpose; response.setTermInMonths(loanApplication.getTermInMonths())
+copies the requested repayment term in months;
+response.setStatus(loanApplication.getStatus()) copies the application's
+current status;
+response.setRejectionReason(loanApplication.getRejectionReason()) copies the
+rejection reason (which may be null if the application was never rejected); re
+sponse.setCreditScoreAtSubmission(loanApplication.getCreditScoreAtSubmission()
+) copies the applicant's credit score as recorded at submission time;
+response.setSubmittedAt(loanApplication.getSubmittedAt()) copies the original
+submission timestamp; and
+response.setDecisionedAt(loanApplication.getDecisionedAt()) copies the
+decision timestamp (which may be null if no decision with a timestamp has been
+recorded, as is the case for the MANUAL_REVIEW outcome described in the third
+chunk).
+
+The next statement declares a local variable named applicant of type
+Applicant, assigned the result of loanApplication.getApplicant() â
+retrieving the applicant entity associated with this loan application via its
+lazily-fetched relationship (as declared on the LoanApplication entity in the
+fourth chunk).
+
+The next statement is an if / else with one condition: applicant != null. If
+this condition is true â meaning the loan application has an associated
+applicant entity successfully retrieved â two statements execute:
+response.setApplicantId(applicant.getId()) sets the response's applicant
+identifier field to the associated applicant's unique identifier, and
+response.setApplicantFullName(applicant.getFullName()) sets the response's
+applicant full name field to the associated applicant's full name. If the
+condition is false â meaning loanApplication.getApplicant() returned null,
+i.e., no applicant entity is associated with this loan application â the
+else branch executes two statements: response.setApplicantId(null) sets the
+response's applicant identifier field to the literal value null, and
+response.setApplicantFullName("UNKNOWN") sets the response's applicant full
+name field to the literal string "UNKNOWN" as a placeholder indicating the
+applicant's identity could not be determined.
+
+The final statement returns response, returning the fully populated response
+object â containing the application's identifier, applicant identity (or
+placeholder), financial amounts, purpose, term, status, rejection reason,
+credit score, and timestamps â to the caller, signifying the complete output
+representation of the given loan application entity.
+
+## Supporting Elements in This Chunk
+
+This chunk contains a single method, toResponse, which constitutes the entire
+primary flow; there are no additional fields, constants, or overloaded methods
+left unreached. This section is included to confirm no additional unreached
+elements exist. No null check is performed on the loanApplication parameter
+itself (only on the result of loanApplication.getApplicant()) â this is an
+absence of a defensive guard against a null input to this method, relying on
+callers (the second and third chunks) to always pass a non-null, persisted
+entity. No exception handling, logging, or transaction management is present
+in this chunk, which is expected for a pure conversion utility.

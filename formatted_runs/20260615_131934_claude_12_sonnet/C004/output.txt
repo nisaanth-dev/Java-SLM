@@ -1,0 +1,272 @@
+business_functional_name: |
+Loan Application Record Structure And Lifecycle Tracking
+
+core_business_functionality: |
+This chunk defines the persistent record structure for a loan application,
+capturing its applicant, financial details, current status, decision outcome,
+and key timestamps. It also automatically tracks when the record was last
+modified and provides a way to determine whether the requested amount
+qualifies as a high-value request.
+
+business_function: |
+Each loan application record stores the applicant it belongs to.
+Each loan application record stores the amount requested and, if applicable,
+the amount approved.
+Each loan application record stores its purpose, term, and current status.
+Each loan application record stores a rejection reason if it was rejected.
+Each loan application record stores the applicant's credit score at the time
+of submission.
+Each loan application record stores when it was submitted, when it was
+decided, and when it was last modified.
+A loan application record can determine whether its requested amount exceeds a
+given threshold.
+
+business_functions_list: 
+  - Store Application Details
+  - Track Applicant Link
+  - Record Financial Amounts
+  - Track Status History
+  - Record Submission Timing
+  - Record Modification Timing
+  - Evaluate High Value
+
+business_rules: 
+  - rule_id: "C004_BR1"
+
+rule: "Every loan application record must be linked to a specific applicant; it cannot exist without one."
+
+condition: "A loan application record is being stored"
+
+action: "The record must reference an associated applicant"
+
+occurrence: "C004_BR1"
+
+source_chunks: ["C004"]
+
+  - rule_id: "C004_BR2"
+
+rule: "Every loan application record must specify the amount requested and the repayment term, and must always have a current status."
+
+condition: "A loan application record is being stored"
+
+action: "The record must include a requested amount, a repayment term, and a status"
+
+occurrence: "C004_BR2"
+
+source_chunks: ["C004"]
+
+  - rule_id: "C004_BR3"
+
+rule: "If a loan application record is created without an explicit status, it is automatically given a starting status of pending."
+
+condition: "A new loan application record is being created and no status has been set on it"
+
+action: "The record's status is set to pending"
+
+occurrence: "C004_BR3"
+
+source_chunks: ["C004"]
+
+  - rule_id: "C004_BR4"
+
+rule: "Every time a loan application record is created or changed, the time of that change is recorded on the record."
+
+condition: "A loan application record is being created or updated"
+
+action: "The record's last-modified timestamp is set to the current date and time"
+
+occurrence: "C004_BR4"
+
+source_chunks: ["C004"]
+
+  - rule_id: "C004_BR5"
+
+rule: "A loan application is considered a high-value request only if both a requested amount and a comparison threshold are known, and the requested amount is strictly greater than that threshold."
+
+condition: "The requested amount and the threshold are both present, and the requested amount is greater than the threshold"
+
+action: "The application is treated as a high-value request"
+
+occurrence: "C004_BR5"
+
+source_chunks: ["C004"]
+
+  - rule_id: "C004_BR6"
+
+rule: "If either the requested amount or the comparison threshold is missing, the application is not treated as a high-value request."
+
+condition: "The requested amount or the threshold is missing"
+
+action: "The application is not treated as a high-value request"
+
+occurrence: "C004_BR6"
+
+source_chunks: ["C004"]
+---
+
+This chunk's imports provide the following capabilities. jakarta.persistence.*
+(a wildcard import) provides all the JPA annotations used in this class:
+@Entity, @Table, @Id, @GeneratedValue, @Column, @ManyToOne, @JoinColumn,
+@PrePersist, @PreUpdate, FetchType, and GenerationType. lombok.Getter and
+lombok.Setter provide automatically generated getter and setter methods for
+every field declared in the class, eliminating the need to write them
+manually. lombok.NoArgsConstructor provides an automatically generated no-
+argument constructor for the class, which JPA requires for entity
+instantiation. java.math.BigDecimal provides the type used for the monetary
+amount fields, and java.time.LocalDateTime provides the type used for the
+timestamp fields.
+
+At the class level, the class is annotated with @Entity, marking it as a JPA-
+managed persistent entity. It is annotated with @Table(name =
+"loan_application"), specifying that instances of this class map to rows in a
+database table named loan_application. It is annotated with @Getter and
+@Setter (Lombok), which generate a getter and setter method for every field in
+the class at compile time. It is annotated with @NoArgsConstructor (Lombok),
+generating a public no-argument constructor.
+
+The fields are described below in declaration order.
+
+The field id is of type Long, annotated with @Id (marking it as the primary
+key of the entity), @GeneratedValue(strategy = GenerationType.IDENTITY)
+(indicating the database automatically generates this value, typically via an
+auto-incrementing column, when a new row is inserted), and @Column(name =
+"id") (mapping this field to a column named id). This field represents the
+unique identifier assigned to each loan application record.
+
+The field applicant is of type Applicant, annotated with @ManyToOne(fetch =
+FetchType.LAZY) and @JoinColumn(name = "applicant_id", nullable = false). The
+@ManyToOne annotation establishes a relationship where many LoanApplication
+records can be associated with one Applicant â in business terms, a single
+applicant may have submitted multiple loan applications, but each loan
+application belongs to exactly one applicant. The fetch = FetchType.LAZY
+setting means the associated Applicant record is not loaded from the database
+until it is actually accessed in code. The @JoinColumn(name = "applicant_id",
+nullable = false) specifies that this relationship is stored via a column
+named applicant_id, and that this column cannot be null â meaning every loan
+application record must reference an applicant. This field represents the
+applicant who submitted this loan application.
+
+The field requestedAmount is of type BigDecimal, annotated with @Column(name =
+"requested_amount", nullable = false, precision = 15, scale = 2). This maps to
+a column named requested_amount that cannot be null, with a numeric precision
+of 15 total digits and 2 digits after the decimal point. This field represents
+the monetary amount the applicant requested to borrow.
+
+The field approvedAmount is of type BigDecimal, annotated with @Column(name =
+"approved_amount", precision = 15, scale = 2). This maps to a column named
+approved_amount, which may be null (no nullable = false specified, so it is
+nullable by default), with the same precision and scale as requestedAmount.
+This field represents the monetary amount actually approved for this loan,
+populated only once a decision has been made.
+
+The field loanPurpose is of type String, annotated with @Column(name =
+"loan_purpose", length = 100). This maps to a column named loan_purpose with a
+maximum length of 100 characters, and is nullable by default. This field
+represents the stated reason the applicant gave for needing the loan.
+
+The field termInMonths is of type Integer, annotated with @Column(name =
+"term_in_months", nullable = false). This maps to a column named
+term_in_months that cannot be null. This field represents the repayment period
+requested for the loan, expressed in months.
+
+The field status is of type String, annotated with @Column(name = "status",
+nullable = false, length = 30). This maps to a column named status that cannot
+be null, with a maximum length of 30 characters. This field represents the
+loan application's current state in its processing lifecycle (e.g., "PENDING",
+"APPROVED", "REJECTED", "PENDING_MANUAL_REVIEW", "CANCELLED").
+
+The field rejectionReason is of type String, annotated with @Column(name =
+"rejection_reason", length = 255). This maps to a column named
+rejection_reason with a maximum length of 255 characters, nullable by default.
+This field represents the explanation recorded when a loan application is
+rejected.
+
+The field creditScoreAtSubmission is of type Integer, annotated with
+@Column(name = "credit_score_at_submission"). This maps to a column named
+credit_score_at_submission, nullable by default, with no length or precision
+constraints specified. This field represents the applicant's credit score as
+it was at the time the application was submitted, preserved even if the
+applicant's score later changes.
+
+The field submittedAt is of type LocalDateTime, annotated with @Column(name =
+"submitted_at", nullable = false). This maps to a column named submitted_at
+that cannot be null. This field represents the date and time the loan
+application was originally submitted.
+
+The field decisionedAt is of type LocalDateTime, annotated with @Column(name =
+"decisioned_at"). This maps to a column named decisioned_at, nullable by
+default. This field represents the date and time a final decision (approval or
+rejection) was recorded for this application; it remains null if no such
+decision has been made or if the application was sent to manual review without
+a recorded decision timestamp.
+
+The field lastModifiedAt is of type LocalDateTime, annotated with @Column(name
+= "last_modified_at"). This maps to a column named last_modified_at, nullable
+by default. This field represents the date and time this record was last
+created or changed, and is maintained automatically by the lifecycle hooks
+described below rather than being set directly by business logic elsewhere.
+
+The class declares two JPA lifecycle hook methods.
+
+The method onCreate is declared as protected, returns void, takes no
+parameters, and is annotated with @PrePersist, meaning it is automatically
+invoked by the JPA provider immediately before a new LoanApplication entity is
+inserted into the database for the first time. The first statement sets
+this.lastModifiedAt = LocalDateTime.now(), recording the current date and time
+as the last-modified timestamp at the moment of creation. The next statement
+is an if statement checking whether this.status == null is true. If this
+condition is true â meaning no status was set on the entity before it is
+persisted â the statement this.status = "PENDING" executes, setting the
+status field to the literal string "PENDING" as a default starting status. If
+the condition is false â meaning a status was already set (as is the case in
+the createApplication flow from the second chunk, which always sets a status
+before saving) â this default-assignment statement is skipped, and the
+existing status value is preserved.
+
+The method onUpdate is declared as protected, returns void, takes no
+parameters, and is annotated with @PreUpdate, meaning it is automatically
+invoked by the JPA provider immediately before an existing LoanApplication
+entity's changes are written to the database. Its single statement sets
+this.lastModifiedAt = LocalDateTime.now(), recording the current date and time
+as the last-modified timestamp at the moment of this update â ensuring
+lastModifiedAt always reflects the most recent change to the record, whether
+that change is the initial creation (handled by onCreate) or any subsequent
+update.
+
+The method isHighValueRequest is declared as public, returns boolean, and
+takes one parameter, threshold, of type BigDecimal, representing a monetary
+value to compare this application's requested amount against.
+
+The first statement is an if statement checking the compound condition
+this.requestedAmount == null || threshold == null â that is, whether the
+entity's requestedAmount field is null, OR whether the threshold parameter
+passed in is null. If this condition is true â meaning either the
+application has no requested amount recorded, or no threshold was provided for
+comparison â the method immediately returns the literal value false,
+signifying that the application cannot be determined to be a high-value
+request when either piece of information needed for the comparison is absent.
+If the condition is false â meaning both this.requestedAmount and threshold
+are non-null â execution continues to the next statement.
+
+The final statement returns the result of
+this.requestedAmount.compareTo(threshold) > 0. The compareTo method compares
+this.requestedAmount against threshold, returning a positive number if
+this.requestedAmount is greater than threshold, zero if they are equal, or a
+negative number if this.requestedAmount is less than threshold. The expression
+> 0 evaluates to true only if this.requestedAmount is strictly greater than
+threshold. This boolean result is returned to the caller, signifying whether
+this loan application's requested amount qualifies as a high-value request
+relative to the given threshold â true if it strictly exceeds the threshold,
+false if it is equal to or less than the threshold.
+
+## Supporting Elements in This Chunk
+
+All fields declared in this class are used either directly (as mapped
+persistent columns described above) or indirectly via the Lombok-generated
+getters and setters (used extensively by other chunks, such as the service in
+the second and third chunks). No field, constant, or method in this chunk is
+left unreached by the narrative above: the fourteen fields are all described
+in the structural field walkthrough, and both lifecycle hook methods
+(onCreate, onUpdate) and the single business method (isHighValueRequest) are
+fully narrated. This section is included to confirm no additional unreached
+elements exist.

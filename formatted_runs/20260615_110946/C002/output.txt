@@ -1,0 +1,67 @@
+business_functional_name: |
+Loan Application Validation And Processing Orchestration
+
+source_line_ranges: ["f02_1-f02_420"]
+
+core_business_functionality: |
+This service validates incoming loan applications, verifies customer
+existence, transforms requests into persistence entities, and orchestrates
+loan creation and retrieval workflows.
+
+business_function: |
+Validate Loan Request
+Create Loan Record
+Retrieve Loan Record
+
+business_functions_list: 
+  - Validate Request
+  - Create Loan
+  - Fetch Loan
+
+business_rules: 
+  - rule_id: "C002_BR1"
+
+rule: "Loan applications must have a positive loan amount before processing"
+
+condition: "Loan amount is less than or equal to zero"
+
+action: "Application is rejected and processing is terminated"
+
+occurrence: "C002_BR1"
+
+source_chunks: ["C002"]
+
+source_line_ranges: ["f02_1-f02_420"]
+
+---
+Technical Narrative:
+The LoanApplicationService class is marked with @Service, making it part of
+the business logic layer.
+
+source_line_ranges: ["f02_1-f02_420"]
+
+The method createApplication first calls validate(request), which checks
+whether loan amount is less than or equal to zero. If true, an
+IllegalArgumentException is thrown and execution stops immediately.
+
+source_line_ranges: ["f02_1-f02_420"]
+
+If validation passes, customerRepository.findById is called to retrieve
+customer information, transferring control to C003.
+
+source_line_ranges: ["f02_1-f02_420"]
+
+The LoanRequest is converted into a LoanEntity using loanMapper.toEntity, then
+its status is set to "PENDING".
+
+source_line_ranges: ["f02_1-f02_420"]
+
+loanRepository.save persists the entity, transferring control to C004 for
+database interaction.
+
+source_line_ranges: ["f02_1-f02_420"]
+
+Finally loanMapper.toResponse converts the entity into a LoanResponse returned
+to the controller.
+
+source_line_ranges: ["f02_1-f02_420"]

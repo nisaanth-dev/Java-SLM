@@ -1,0 +1,208 @@
+CHUNK_ID: C002
+
+APPLICATION: Meridian Loan Origination Platform
+
+SERVICE: loan-application-service
+
+FILE: f02 (com.meridian.loanorigination.service.LoanApplicationService)
+
+LAYER: Service
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.meridian.loanorigination.service;
+
+import com.meridian.loanorigination.dto.LoanApplicationRequestDTO;
+import com.meridian.loanorigination.dto.LoanApplicationResponseDTO;
+import com.meridian.loanorigination.dto.LoanStatusResponseDTO;
+import com.meridian.loanorigination.entity.LoanApplication;
+import com.meridian.loanorigination.exception.LoanApplicationNotFoundException;
+import com.meridian.loanorigination.exception.LoanValidationException;
+import com.meridian.loanorigination.mapper.LoanApplicationMapper;
+import com.meridian.loanorigination.repository.LoanApplicationRepository;
+import com.meridian.loanorigination.event.LoanApplicationSubmittedEvent;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class LoanApplicationService {
+
+    private static final List<String> VALID_STATUS_TRANSITIONS = Arrays.asList(
+            "SUBMITTED", "UNDER_REVIEW", "CREDIT_CHECK_PENDING",
+            "CREDIT_CHECK_PASSED", "CREDIT_CHECK_FAILED",
+            "APPROVED", "REJECTED", "DISBURSED", "CANCELLED"
+    );
+
+    private static final String STATUS_SUBMITTED = "SUBMITTED";
+    private static final String STATUS_CANCELLED = "CANCELLED";
+    private static final String STATUS_DISBURSED  = "DISBURSED";
+    private static final String STATUS_APPROVED   = "APPROVED";
+
+    private final LoanApplicationRepository loanApplicationRepository;
+    private final LoanApplicationMapper loanApplicationMapper;
+    private final ApplicationEventPublisher eventPublisher;
+
+    @Transactional
+    public LoanApplicationResponseDTO submitApplication(LoanApplicationRequestDTO requestDTO) {
+
+        log.info("Processing loan application submission for applicant: {}",
+                requestDTO.getApplicantNationalId());
+
+        validateLoanRequest(requestDTO);
+
+        String applicationReference = "LN-" + UUID.randomUUID().toString().toUpperCase();
+
+        LoanApplication loanApplication = loanApplicationMapper.toEntity(requestDTO);
+        loanApplication.setApplicationReference(applicationReference);
+        loanApplication.setStatus(STATUS_SUBMITTED);
+        loanApplication.setSubmittedAt(LocalDateTime.now());
+        loanApplication.setLastModifiedAt(LocalDateTime.now());
+
+        LoanApplication savedApplication = loanApplicationRepository.save(loanApplication);
+
+        log.info("Loan application persisted with reference: {} and status: {}",
+                savedApplication.getApplicationReference(), savedApplication.getStatus());
+
+        LoanApplicationSubmittedEvent event =
+                new LoanApplicationSubmittedEvent(this, savedApplication.getApplicationReference(),
+                        savedApplication.getApplicantNationalId(), savedApplication.getRequestedAmount());
+
+        eventPublisher.publishEvent(event);
+
+        log.info("LoanApplicationSubmittedEvent published for reference: {}",
+                savedApplication.getApplicationReference());
+
+        return loanApplicationMapper.toResponseDTO(savedApplication);
+    }
+
+    @Transactional(readOnly = true)
+    public LoanApplicationResponseDTO getApplicationByReference(String applicationReference) {
+
+        log.info("Retrieving loan application by reference: {}", applicationReference);
+
+        LoanApplication loanApplication =
+                loanApplicationRepository.findByApplicationReference(applicationReference)
+                        .orElseThrow(() -> new LoanApplicationNotFoundException(
+                                "Loan application not found for reference: " + applicationReference));
+
+        return loanApplicationMapper.toResponseDTO(loanApplication);
+    }
+
+    @Transactional(readOnly = true)
+    public List<LoanApplicationResponseDTO> getApplicationsByApplicantId(String nationalId) {
+
+        log.info("Retrieving all loan applications for applicant: {}", nationalId);
+
+        List<LoanApplication> applications =
+                loanApplicationRepository.findAllByApplicantNationalId(nationalId);
+
+        return applications.stream()
+                .map(loanApplicationMapper::toResponseDTO)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public LoanStatusResponseDTO updateApplicationStatus(
+            String applicationReference, String newStatus, String remarks) {
+
+        log.info("Updating loan application status: reference={}, newStatus={}",
+                applicationReference, newStatus);
+
+        if (!VALID_STATUS_TRANSITIONS.contains(newStatus)) {
+            throw new LoanValidationException(
+                    "Invalid status value: '" + newStatus +
+                    "'. Must be one of: " + VALID_STATUS_TRANSITIONS);
+        }
+
+        LoanApplication loanApplication =
+                loanApplicationRepository.findByApplicationReference(applicationReference)
+                        .orElseThrow(() -> new LoanApplicationNotFoundException(
+                                "Loan application not found for reference: " + applicationReference));
+
+        String previousStatus = loanApplication.getStatus();
+
+        if (STATUS_CANCELLED.equals(previousStatus) || STATUS_DISBURSED.equals(previousStatus)) {
+            throw new LoanValidationException(
+                    "Cannot change status of a loan application that is already "
+                    + previousStatus + ". Application reference: " + applicationReference);
+        }
+
+        if (STATUS_APPROVED.equals(newStatus) && !STATUS_APPROVED.equals(previousStatus)) {
+            loanApplication.setApprovedAt(LocalDateTime.now());
+        }
+
+        loanApplication.setStatus(newStatus);
+        loanApplication.setRemarks(remarks);
+        loanApplication.setLastModifiedAt(LocalDateTime.now());
+
+        LoanApplication updatedApplication = loanApplicationRepository.save(loanApplication);
+
+        log.info("Loan application {} status changed from {} to {}",
+                applicationReference, previousStatus, newStatus);
+
+        LoanStatusResponseDTO statusResponse = new LoanStatusResponseDTO();
+        statusResponse.setApplicationReference(updatedApplication.getApplicationReference());
+        statusResponse.setStatus(updatedApplication.getStatus());
+        statusResponse.setPreviousStatus(previousStatus);
+        statusResponse.setRemarks(updatedApplication.getRemarks());
+        statusResponse.setLastModifiedAt(updatedApplication.getLastModifiedAt());
+
+        return statusResponse;
+    }
+
+    @Transactional(readOnly = true)
+    public LoanStatusResponseDTO getApplicationStatus(String applicationReference) {
+
+        log.info("Retrieving status for loan application: {}", applicationReference);
+
+        LoanApplication loanApplication =
+                loanApplicationRepository.findByApplicationReference(applicationReference)
+                        .orElseThrow(() -> new LoanApplicationNotFoundException(
+                                "Loan application not found for reference: " + applicationReference));
+
+        LoanStatusResponseDTO statusResponse = new LoanStatusResponseDTO();
+        statusResponse.setApplicationReference(loanApplication.getApplicationReference());
+        statusResponse.setStatus(loanApplication.getStatus());
+        statusResponse.setRemarks(loanApplication.getRemarks());
+        statusResponse.setLastModifiedAt(loanApplication.getLastModifiedAt());
+
+        return statusResponse;
+    }
+
+    private void validateLoanRequest(LoanApplicationRequestDTO requestDTO) {
+
+        if (requestDTO.getRequestedAmount() == null || requestDTO.getRequestedAmount().signum() <= 0) {
+            throw new LoanValidationException(
+                    "Requested loan amount must be a positive value. Received: "
+                    + requestDTO.getRequestedAmount());
+        }
+
+        if (requestDTO.getLoanTermMonths() == null || requestDTO.getLoanTermMonths() < 1
+                || requestDTO.getLoanTermMonths() > 360) {
+            throw new LoanValidationException(
+                    "Loan term must be between 1 and 360 months. Received: "
+                    + requestDTO.getLoanTermMonths());
+        }
+
+        if (requestDTO.getLoanPurpose() == null || requestDTO.getLoanPurpose().isBlank()) {
+            throw new LoanValidationException("Loan purpose must not be blank.");
+        }
+
+        log.debug("Loan application request validation passed for applicant: {}",
+                requestDTO.getApplicantNationalId());
+    }
+}

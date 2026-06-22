@@ -1,0 +1,188 @@
+business_functional_name: |
+Core Claim Processing And Routing
+
+core_business_functionality: |
+Executes the central business logic for evaluating, recording, and routing
+newly submitted insurance claims. Applies financial thresholds to determine
+immediate status and publishes creation events to downstream systems.
+
+business_function: 
+  - Orchestrates the ingestion of a new claim record.
+  - Evaluates financial thresholds to assign initial processing status.
+  - Persists evaluated claim records to the database.
+  - Publishes notifications for newly recorded claims.
+  - Retrieves the current state of an existing claim.
+
+business_functions_list: 
+  - Orchestrate Ingestion
+  - Evaluate Thresholds
+  - Persist Record
+  - Publish Notification
+  - Retrieve State
+
+business_rules: 
+  - rule_id: "C004_BR1"
+
+rule: "If the financial amount of a submitted claim strictly exceeds one hundred thousand, the claim bypasses standard processing and is immediately routed for manual review."
+
+condition: "Claim amount is greater than 100,000.00"
+
+action: "Set status to manual review"
+
+occurrence: "C004_BR1"
+
+source_chunks: ["C004"]
+
+  - rule_id: "C004_BR2"
+
+rule: "If a submitted claim does not have any supporting evidence attached, it cannot proceed and is placed in a queue awaiting documentation."
+
+condition: "Claim submission lacks supporting documents"
+
+action: "Set status to pending documents"
+
+occurrence: "C004_BR2"
+
+source_chunks: ["C004"]
+
+  - rule_id: "C004_BR3"
+
+rule: "If a claim possesses supporting documents and meets the urgency criteria, it is flagged for expedited adjudication."
+
+condition: "Claim has documents and requires urgent review"
+
+action: "Set status to expedited adjudication"
+
+occurrence: "C004_BR3"
+
+source_chunks: ["C004"]
+
+  - rule_id: "C004_BR4"
+
+rule: "If a claim possesses documents but does not meet urgency criteria, it is queued for standard adjudication."
+
+condition: "Claim has documents but is not urgent"
+
+action: "Set status to pending adjudication"
+
+occurrence: "C004_BR4"
+
+source_chunks: ["C004"]
+
+  - rule_id: "C004_BR5"
+
+rule: "If the system successfully saves a claim but fails to notify downstream components due to a communication error, the claim creation is still considered successful and is not reversed."
+
+condition: "Notification broadcast fails after successful persistence"
+
+action: "Continue processing without reversing the save"
+
+occurrence: "C004_BR5"
+
+source_chunks: ["C004"]
+
+Imports
+This chunk imports ClaimSubmissionRequest and ClaimResponse from the
+com.acme.insurance.claims.dto layer for request and response data structures.
+It imports ClaimRecord from the com.acme.insurance.claims.entity layer for
+database mapping, and ClaimRepository from the
+com.acme.insurance.claims.repository layer for data access operations. It
+imports ClaimProcessingService from the com.acme.insurance.claims.service
+layer, defining the interface this class implements, and ClaimEntityMapper
+from com.acme.insurance.claims.mapper to handle object conversions. It imports
+ClaimSystemException from com.acme.insurance.claims.exception for custom error
+handling. It imports Spring Framework annotations @Service to register the
+business component and @Transactional to manage database boundaries. It
+imports KafkaTemplate from org.springframework.kafka.core to enable publishing
+messages to a broker. Standard Logger, LoggerFactory, List, and BigDecimal are
+also imported.
+
+Class-Level Declarations
+The ClaimProcessingServiceImpl class is annotated with @Service, indicating it
+contains core business logic. It declares a constant Logger named log, and a
+String constant named TOPIC_CLAIM_EVENTS initialized to the literal
+"acme.claims.ingestion.events". It declares three private, final injected
+dependencies: claimRepository of type ClaimRepository, claimMapper of type
+ClaimEntityMapper, and kafkaTemplate of type KafkaTemplate<String, Object>. A
+constructor accepts these three dependencies and initializes the fields.
+
+Primary Flow: processNewClaim
+The processNewClaim method is exposed publicly, overriding the interface
+definition. It is annotated with @Transactional, indicating all database
+operations within it execute in a single atomic transaction. It returns a
+ClaimResponse and accepts two parameters: a ClaimSubmissionRequest named
+request, and a String named sourceSystem.
+
+The method logs the start of processing using request.getPolicyNumber(). It
+declares a local variable record of type ClaimRecord and assigns it the return
+value of the external cross-chunk call claimMapper.toEntity(request). Control
+transfers out to the mapper and returns with the populated entity. The method
+sets the system origin by calling record.setSourceSystem(sourceSystem).
+
+The method makes an internal call to determineInitialRoutingStatus(record,
+request).
+Control transfers to determineInitialRoutingStatus. This method evaluates
+conditions to set the status. An if statement checks whether
+request.getClaimAmount() is not null and if
+request.getClaimAmount().compareTo(new BigDecimal("100000.00")) > 0 is true.
+If this condition is true (amount over 100k), the method logs a warning,
+assigns the literal "REJECTED_MANUAL_REVIEW" via
+record.setStatus("REJECTED_MANUAL_REVIEW"), and executes a return statement,
+terminating this helper method and returning control to the caller. If false,
+execution continues.
+A second if statement checks whether the logical NOT of the external call
+request.hasSupportingDocuments() evaluates to true (meaning documents are
+missing). If true, it logs an informational message, assigns the literal
+"PENDING_DOCUMENTS" via record.setStatus("PENDING_DOCUMENTS"), and returns,
+terminating the helper. If false, execution continues.
+A third if statement evaluates the external call
+request.requiresUrgentReview(). If true, it sets the status to the literal
+"EXPEDITED_ADJUDICATION". If false (the else branch), it sets the status to
+the literal "PENDING_ADJUDICATION". The helper method naturally completes and
+returns.
+Control returns to processNewClaim immediately after the internal call.
+
+The method declares a local variable savedRecord of type ClaimRecord. A try /
+catch block wraps the database persistence operation.
+Inside the try block, savedRecord is assigned the return value of the external
+data access call claimRepository.save(record). Control transfers to the
+repository layer and returns the persisted entity. The method logs a debug
+message using savedRecord.getClaimId().
+The catch block captures any Exception named ex. The business condition
+triggering this block is any failure during database persistence. In response,
+it logs the error and throws a new ClaimSystemException instantiated with the
+literal error code "E_DB_001", a descriptive message, and the original
+exception ex. The business outcome is that processing aborts, the transaction
+rolls back, and the caller receives an error.
+
+Assuming success, the method makes an internal call to
+publishClaimEvent("CLAIM_CREATED", savedRecord).
+Control transfers to publishClaimEvent. It accepts a String eventType and a
+ClaimRecord record. A try / catch block wraps the messaging logic.
+Inside the try block, a local variable eventPayload of type ClaimResponse is
+assigned the return value of the external call claimMapper.toResponse(record).
+The method overrides the payload status by calling
+eventPayload.setClaimStatus(eventType). It then makes an external call to
+kafkaTemplate.send(TOPIC_CLAIM_EVENTS, record.getClaimId(), eventPayload).
+Control transfers to the Kafka producer and returns. It logs success.
+The catch block captures any Exception named ex. The business condition
+triggering this block is a failure to publish to the message broker. In
+response, it logs an error indicating it is proceeding without the event. The
+business outcome is that execution continues; the database transaction is
+intentionally not rolled back.
+Control returns to processNewClaim immediately after the internal call.
+
+Finally, the method returns the value produced by the external call
+claimMapper.toResponse(savedRecord). Control transfers out to the mapper and
+returns the DTO to the caller.
+
+Supporting Elements in This Chunk
+The retrieveClaimStatus method is a public override annotated with
+@Transactional(readOnly = true), signifying a read-only database transaction.
+It returns a ClaimResponse and accepts a String named claimId. It declares a
+local variable record of type ClaimRecord. It assigns this variable the result
+of calling the external data access method claimRepository.findById(claimId)
+and chaining .orElse(null) to extract the value or null. An if statement
+checks whether record == null. If true, the method returns null and
+terminates. If false, it returns the value produced by the external call
+claimMapper.toResponse(record).

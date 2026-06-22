@@ -1,0 +1,63 @@
+business_functional_name: |
+Document Update Request Structure
+
+core_business_functionality: |
+Defines the inbound payload format required when external systems attempt to
+attach supplementary files to an existing claim, enforcing volume limits per
+transaction.
+
+business_function: 
+  - Specifies the list format for incoming document identifiers.
+  - Enforces the minimum required number of documents per request.
+  - Restricts the maximum allowed documents per request to prevent system overload.
+
+business_functions_list: 
+  - Specify Format
+  - Enforce Minimum
+  - Restrict Volume
+
+business_rules: 
+  - rule_id: "C012_BR1"
+
+rule: "When updating a claim with documents, the submission must contain at least one valid document identifier; empty submissions are rejected."
+
+condition: "Document list is empty"
+
+action: "Reject the update request"
+
+occurrence: "C012_BR1"
+
+source_chunks: ["C012"]
+
+  - rule_id: "C012_BR2"
+
+rule: "A single update transaction cannot attach more than ten documents at a time to prevent processing limits from being exceeded."
+
+condition: "Document list contains more than ten identifiers"
+
+action: "Reject the update request"
+
+occurrence: "C012_BR2"
+
+source_chunks: ["C012"]
+
+Imports
+This chunk imports `NotEmpty` and `Size` from `jakarta.validation.constraints`
+to apply validation rules. It imports `JsonProperty` from Jackson to map JSON
+inputs to Java properties. It imports Lombok's `@Data` and
+`@NoArgsConstructor` to generate boilerplate methods and constructors. It
+imports the standard Java `List`.
+
+Class-Level Declarations
+The `DocumentUpdateRequest` class is annotated with `@Data`, generating
+standard getter, setter, and equality methods. It is annotated with
+`@NoArgsConstructor`, generating an empty default constructor.
+
+Fields
+The class declares one field:
+
+  - `documentIds`: A `List<String>` representing the unique identifiers of the files to be attached to the claim. It is annotated with `@NotEmpty(message = "At least one document ID must be provided")` which enforces that the list cannot be null or empty. It is annotated with `@Size(max = 10, message = "A maximum of 10 documents can be attached per request")` which enforces a strict upper boundary on the number of items. It is mapped to the incoming JSON via `@JsonProperty("document_ids")`.
+
+Methods
+This chunk contains purely structural declarations and no conditional
+branching logic.

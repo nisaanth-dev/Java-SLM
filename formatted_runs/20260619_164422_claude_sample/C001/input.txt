@@ -1,0 +1,163 @@
+CHUNK_ID: C001
+
+APPLICATION: Meridian Loan Origination Platform
+
+SERVICE: loan-application-service
+
+FILE: f01 (com.meridian.loanorigination.controller.LoanApplicationController)
+
+LAYER: Controller
+
+ENTRY_POINT: yes
+
+=== CODE ===
+
+package com.meridian.loanorigination.controller;
+
+import com.meridian.loanorigination.dto.LoanApplicationRequestDTO;
+import com.meridian.loanorigination.dto.LoanApplicationResponseDTO;
+import com.meridian.loanorigination.dto.LoanStatusResponseDTO;
+import com.meridian.loanorigination.exception.LoanApplicationNotFoundException;
+import com.meridian.loanorigination.exception.LoanValidationException;
+import com.meridian.loanorigination.service.LoanApplicationService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.*;
+
+import javax.validation.Valid;
+import javax.validation.constraints.NotBlank;
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/v1/loans")
+@RequiredArgsConstructor
+@Slf4j
+@Validated
+public class LoanApplicationController {
+
+    private final LoanApplicationService loanApplicationService;
+
+    /**
+     * Submits a new loan application for processing.
+     */
+    @PostMapping("/applications")
+    public ResponseEntity<LoanApplicationResponseDTO> submitLoanApplication(
+            @Valid @RequestBody LoanApplicationRequestDTO requestDTO) {
+
+        log.info("Received loan application submission request for applicant: {}",
+                requestDTO.getApplicantNationalId());
+
+        try {
+            LoanApplicationResponseDTO responseDTO =
+                    loanApplicationService.submitApplication(requestDTO);
+
+            log.info("Loan application successfully created with reference: {}",
+                    responseDTO.getApplicationReference());
+
+            return ResponseEntity.status(HttpStatus.CREATED).body(responseDTO);
+
+        } catch (LoanValidationException ex) {
+            log.warn("Loan application submission failed due to validation error: {}",
+                    ex.getMessage());
+            throw ex;
+        }
+    }
+
+    /**
+     * Retrieves a loan application by its unique reference number.
+     */
+    @GetMapping("/applications/{applicationReference}")
+    public ResponseEntity<LoanApplicationResponseDTO> getLoanApplicationByReference(
+            @PathVariable @NotBlank String applicationReference) {
+
+        log.info("Fetching loan application for reference: {}", applicationReference);
+
+        try {
+            LoanApplicationResponseDTO responseDTO =
+                    loanApplicationService.getApplicationByReference(applicationReference);
+
+            return ResponseEntity.ok(responseDTO);
+
+        } catch (LoanApplicationNotFoundException ex) {
+            log.warn("Loan application not found for reference: {}", applicationReference);
+            throw ex;
+        }
+    }
+
+    /**
+     * Retrieves all loan applications associated with a given applicant national ID.
+     */
+    @GetMapping("/applications/applicant/{nationalId}")
+    public ResponseEntity<List<LoanApplicationResponseDTO>> getApplicationsByApplicant(
+            @PathVariable @NotBlank String nationalId) {
+
+        log.info("Fetching all loan applications for applicant national ID: {}", nationalId);
+
+        List<LoanApplicationResponseDTO> applications =
+                loanApplicationService.getApplicationsByApplicantId(nationalId);
+
+        if (applications.isEmpty()) {
+            log.info("No loan applications found for applicant national ID: {}", nationalId);
+            return ResponseEntity.noContent().build();
+        }
+
+        return ResponseEntity.ok(applications);
+    }
+
+    /**
+     * Updates the status of an existing loan application (e.g., APPROVED, REJECTED, UNDER_REVIEW).
+     */
+    @PutMapping("/applications/{applicationReference}/status")
+    public ResponseEntity<LoanStatusResponseDTO> updateApplicationStatus(
+            @PathVariable @NotBlank String applicationReference,
+            @RequestParam @NotBlank String newStatus,
+            @RequestParam(required = false) String remarks) {
+
+        log.info("Updating status of loan application {} to {}", applicationReference, newStatus);
+
+        try {
+            LoanStatusResponseDTO statusResponse =
+                    loanApplicationService.updateApplicationStatus(
+                            applicationReference, newStatus, remarks);
+
+            log.info("Status of loan application {} successfully updated to {}",
+                    applicationReference, newStatus);
+
+            return ResponseEntity.ok(statusResponse);
+
+        } catch (LoanApplicationNotFoundException ex) {
+            log.warn("Cannot update status: loan application {} not found",
+                    applicationReference);
+            throw ex;
+        } catch (LoanValidationException ex) {
+            log.warn("Cannot update status of loan application {}: {}",
+                    applicationReference, ex.getMessage());
+            throw ex;
+        }
+    }
+
+    /**
+     * Retrieves only the current status of a loan application, for lightweight polling.
+     */
+    @GetMapping("/applications/{applicationReference}/status")
+    public ResponseEntity<LoanStatusResponseDTO> getApplicationStatus(
+            @PathVariable @NotBlank String applicationReference) {
+
+        log.info("Polling status for loan application reference: {}", applicationReference);
+
+        try {
+            LoanStatusResponseDTO statusResponse =
+                    loanApplicationService.getApplicationStatus(applicationReference);
+
+            return ResponseEntity.ok(statusResponse);
+
+        } catch (LoanApplicationNotFoundException ex) {
+            log.warn("Cannot retrieve status: loan application {} not found",
+                    applicationReference);
+            throw ex;
+        }
+    }
+}

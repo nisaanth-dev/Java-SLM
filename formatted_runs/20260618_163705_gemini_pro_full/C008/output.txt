@@ -1,0 +1,82 @@
+business_functional_name: |
+External Communication Client Configuration
+
+core_business_functionality: |
+Establishes the technical communication parameters for the system to talk to
+external partners. Enforces strict time limits on how long the system will
+wait for a response and automatically attaches required security credentials
+to all outbound requests.
+
+business_function: 
+  - Defines network connection and wait limits for external communications.
+  - Automatically injects internal system credentials into outgoing messages.
+
+business_functions_list: 
+  - Define Limits
+  - Inject Credentials
+
+business_rules: 
+  - rule_id: "C008_BR1"
+
+rule: "When communicating with an external system, the application must not wait longer than five seconds to establish a connection, and must not wait longer than fifteen seconds to receive data, preventing system freezes."
+
+condition: "Application initiates an outbound external call"
+
+action: "Enforce strict five-second connection and fifteen-second read timeouts"
+
+occurrence: "C008_BR1"
+
+source_chunks: ["C008"]
+
+  - rule_id: "C008_BR2"
+
+rule: "Every outbound communication to an external system must automatically include the internal system identifier to prove its authenticity."
+
+condition: "Application sends an outbound request"
+
+action: "Append internal system authentication credentials to the request"
+
+occurrence: "C008_BR2"
+
+source_chunks: ["C008"]
+
+Imports
+This chunk imports Spring Framework configuration and client annotations
+(`Bean`, `Configuration`) which provide the capabilities to register
+manageable components in the application context. It imports `RestTemplate`,
+`RestTemplateBuilder`, and `ClientHttpRequestInterceptor` from
+`org.springframework.web.client` and `org.springframework.http.client` to
+construct and customize HTTP communication objects. It imports
+`CollectionUtils` from `org.springframework.util` for null-safe list checks,
+and standard Java `Duration`, `ArrayList`, and `List`.
+
+Class-Level Declarations
+The `IntegrationConfig` class is annotated with `@Configuration`, meaning it
+declares one or more `@Bean` methods and may be processed by the Spring
+container to generate bean definitions and service requests at runtime.
+
+Methods
+The `externalServiceClient` method returns a `RestTemplate` and is annotated
+with `@Bean`, meaning its return value is registered as a managed component.
+It accepts a `RestTemplateBuilder` named `builder`.
+
+It declares a local variable `restTemplate` of type `RestTemplate`. It assigns
+this variable the result of a chain of builder calls:
+`.setConnectTimeout(Duration.ofSeconds(5))` setting a five-second connection
+limit, `.setReadTimeout(Duration.ofSeconds(15))` setting a fifteen-second read
+limit, and finally `.build()`.
+
+It declares a `List<ClientHttpRequestInterceptor>` named `interceptors` and
+assigns it the result of `restTemplate.getInterceptors()`. An `if` statement
+checks whether `CollectionUtils.isEmpty(interceptors)` is true. If this
+condition is true, it assigns a `new ArrayList<>()` to `interceptors`. If
+false, execution continues.
+
+It calls `interceptors.add()` with a lambda expression representing the
+interceptor logic. For every outbound request, the lambda accesses the request
+headers via `request.getHeaders().add("X-System-Auth",
+"ACME_CLAIMS_INTERNAL")` to inject a security token, and then returns the
+result of `execution.execute(request, body)` to proceed with the call.
+
+Finally, it calls `restTemplate.setInterceptors(interceptors)` to apply the
+modified list, and returns the fully configured `restTemplate`.

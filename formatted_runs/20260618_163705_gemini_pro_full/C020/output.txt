@@ -1,0 +1,80 @@
+business_functional_name: |
+Claim Lifecycle Event Auditing
+
+core_business_functionality: |
+Subscribes to the central messaging system to silently observe and record
+significant changes in a claim's lifecycle, ensuring a durable, read-only
+audit trail is maintained without interfering with primary business
+operations.
+
+business_function: 
+  - Listens to the enterprise message broker for claim events.
+  - Discards empty or blank event notifications without processing.
+  - Records the exact content of the event payload to the permanent audit trail.
+  - Captures and logs processing failures to prevent the background listener thread from crashing.
+
+business_functions_list: 
+  - Listen For Events
+  - Discard Empty Notifications
+  - Record Audit Trail
+  - Capture Failures
+
+business_rules: 
+  - rule_id: "C020_BR1"
+
+rule: "If an incoming lifecycle event notification contains no data, the system must skip the audit process entirely rather than recording an empty entry."
+
+condition: "Incoming event payload is empty or missing"
+
+action: "Skip the audit process"
+
+occurrence: "C020_BR1"
+
+source_chunks: ["C020"]
+
+  - rule_id: "C020_BR2"
+
+rule: "If a system failure occurs while attempting to record an audit entry, the error must be captured and logged locally without crashing the background listener."
+
+condition: "An internal exception occurs while writing the audit entry"
+
+action: "Log the failure and continue operating"
+
+occurrence: "C020_BR2"
+
+source_chunks: ["C020"]
+
+Imports
+This chunk imports `KafkaListener` from `org.springframework.kafka.annotation`
+to configure the method as a message broker consumer. It imports Spring's
+`@Component` annotation to register the class as a managed bean. It imports
+SLF4J `Logger` and `LoggerFactory` for logging operations.
+
+Class-Level Declarations
+The `ClaimEventListener` class is annotated with `@Component` to be
+automatically detected by the application context. It declares a constant
+`Logger` named `log`.
+
+Primary Flow: handleClaimEvent
+The `handleClaimEvent` method acts as an external entry point triggered
+asynchronously by the message broker. It is annotated with
+`@KafkaListener(topics = "acme.claims.ingestion.events", groupId = "audit-
+logging-group")`, binding it to the specified topic and consumer group. It
+returns `void` and accepts a `String` named `eventPayload`.
+
+The method logs the interception of the event. An `if` statement checks
+whether `eventPayload` is `null` or if `eventPayload.trim().isEmpty()`
+evaluates to true. If this condition is true, it logs a warning that an empty
+payload was received, and executes a `return` statement to skip processing and
+terminate. If false, execution continues.
+
+A `try / catch` block wraps the auditing logic.
+Inside the `try` block, the method records the exact payload to the log via
+`log.info("AUDIT TRAIL ENTRY: {}", eventPayload)`.
+The `catch` block captures any `Exception` named `ex`. The business condition
+triggering this block is an unexpected failure during the recording process.
+In response, it logs a critical failure message indicating the payload was
+lost in processing, utilizing the caught exception stack trace. The business
+outcome is that the exception is safely absorbed and the listener method
+completes, allowing the framework to poll for the next message without
+crashing the consumer thread.

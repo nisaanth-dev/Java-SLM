@@ -1,0 +1,274 @@
+business_functional_name: |
+Loan Application Submission And Retrieval Endpoints
+
+core_business_functionality: |
+This component exposes the HTTP entry points through which borrowers and
+officers submit new loan applications, retrieve the details of individual
+applications, retrieve all applications associated with a specific borrower,
+and update the status of an application as it progresses through the
+origination lifecycle. It is responsible for accepting validated inbound
+requests and delegating all business processing to the service layer.
+
+business_function: |
+Accept a new loan application submission from a borrower or originating
+officer.
+Return the newly created application record with its assigned reference upon
+successful submission.
+Retrieve the full details of a specific loan application by its unique
+reference number.
+Retrieve the list of all loan applications associated with a given borrower,
+with pagination support.
+Accept a request to update the status of an existing loan application.
+Return the updated application record following a successful status change.
+Log incoming request details for traceability.
+Log the outcome of completed operations for audit support.
+
+business_functions_list: 
+  - Submit Loan Application
+  - Assign Application Reference
+  - Retrieve Application Details
+  - List Borrower Applications
+  - Support Paginated Retrieval
+  - Update Application Status
+  - Log Submission Activity
+  - Log Retrieval Activity
+
+business_rules: 
+  - rule_id: "C003_BR1"
+
+rule: "A new loan application submission must carry all required borrower and loan details in a valid format before it can be accepted; any submission failing field-level validation is rejected before reaching internal processing."
+
+condition: "A new loan application is submitted to the system."
+
+action: "The system validates the submitted data against the application's field rules, rejects the request if any constraint is violated, and â on a fully valid submission â creates the application record and returns the assigned reference with a 201 Created response."
+
+occurrence: "C003_BR1"
+
+source_chunks: ["C003"]
+
+  - rule_id: "C003_BR2"
+
+rule: "A loan application can only be retrieved if its unique reference number is supplied; no retrieval without an explicit application reference is permitted through this entry point."
+
+condition: "A request is received to view loan application details."
+
+action: "The system returns the full application details when a valid reference is provided."
+
+occurrence: "C003_BR2"
+
+source_chunks: ["C003"]
+
+  - rule_id: "C003_BR3"
+
+rule: "When retrieving a borrower's applications, the result set must be paginated; the default page is the first page and the default page size is ten records, both of which can be overridden by the requester."
+
+condition: "A request is received to list all loan applications for a specific borrower."
+
+action: "The system returns a paginated list of applications, using the requester's specified page number and page size, or defaulting to page 0 and size 10 if not specified."
+
+occurrence: "C003_BR3"
+
+source_chunks: ["C003"]
+
+  - rule_id: "C003_BR4"
+
+rule: "A status update request must carry all required status-change information in a valid format before it can be accepted."
+
+condition: "A request is received to update the status of an existing loan application."
+
+action: "The system validates the status update payload and, if valid, applies the status change and returns the updated application record."
+
+occurrence: "C003_BR4"
+
+source_chunks: ["C003"]
+
+---
+
+**Technical Narrative**
+
+**Imports and Framework Dependencies**
+
+This file opens at the top of the source for class `LoanApplicationController`
+in the `com.credex.loanorigination.controller` package. The in-application
+imports are: `com.credex.loanorigination.dto.LoanApplicationRequestDTO` from
+the DTO layer, which carries the validated incoming data for a new application
+submission; `com.credex.loanorigination.dto.LoanApplicationResponseDTO` from
+the DTO layer, used as the response body for all endpoints that return
+application data; `com.credex.loanorigination.dto.LoanStatusUpdateRequestDTO`
+from the DTO layer, which carries the validated payload for a status update
+request; and `com.credex.loanorigination.service.LoanApplicationService` from
+the service layer, the dependency to which all business processing is
+delegated. `jakarta.validation.Valid` provides the annotation that triggers
+Bean Validation on annotated method parameters. `org.slf4j.Logger` and
+`org.slf4j.LoggerFactory` provide the structured logging abstraction and
+factory used to obtain a logger instance. From Spring MVC: `HttpStatus`
+provides the enumeration of HTTP response status codes; `ResponseEntity` is
+the generic wrapper that lets the method control both the response body and
+the HTTP status; `@GetMapping`, `@PostMapping`, and `@PutMapping` map HTTP
+GET, POST, and PUT requests respectively to handler methods; `@PathVariable`
+binds a URI template variable to a method parameter; `@RequestBody` binds the
+HTTP request body to a method parameter and triggers deserialization;
+`@RequestMapping` establishes a base URL path for all endpoints in the class;
+`@RequestParam` binds a query parameter to a method parameter; and
+`@RestController` marks this class as a REST controller whose methods produce
+JSON responses directly (equivalent to `@Controller` plus `@ResponseBody` on
+every method). `java.util.List` is the collection type for the paginated
+results endpoint.
+
+**Class-Level Declaration**
+
+The class `LoanApplicationController` carries two class-level annotations.
+`@RestController` registers this class with the Spring MVC dispatcher as a
+REST controller, causing every method's return value to be serialized as the
+HTTP response body. `@RequestMapping("/api/v1/loan-applications")` establishes
+the base URL path `"/api/v1/loan-applications"` for all endpoints defined
+within this class; every specific endpoint path is appended to this base.
+
+The class declares one class-level constant and one class-level field. The
+constant `logger` is of type `Logger`, declared `private static final`. It is
+initialized by calling
+`LoggerFactory.getLogger(LoanApplicationController.class)`, binding the logger
+to this class for structured log output. The field `loanApplicationService` is
+of type `LoanApplicationService`, declared `private final`, making it
+immutable after construction. No injection annotations are present on this
+field; injection is performed via the constructor.
+
+**Constructor**
+
+The sole constructor accepts one parameter: `loanApplicationService` of type
+`LoanApplicationService`. It assigns the received instance to
+`this.loanApplicationService`. Spring detects this as the single constructor
+and automatically injects the `LoanApplicationService` bean, applying
+constructor injection without requiring an explicit `@Autowired` annotation.
+No null check on the injected dependency is performed.
+
+**Primary Entry Point â `submitApplication(LoanApplicationRequestDTO
+requestDTO)`**
+
+The method `submitApplication` is declared `public` and returns
+`ResponseEntity<LoanApplicationResponseDTO>`. It carries `@PostMapping` with
+no sub-path, mapping it to `POST /api/v1/loan-applications`. The parameter
+`requestDTO` is of type `LoanApplicationRequestDTO`, annotated with `@Valid`
+â causing Spring to invoke Bean Validation on the deserialized object before
+the method body executes, rejecting the request with a 400 status and
+constraint violation details if any field fails validation â and
+`@RequestBody` â causing Spring to deserialize the HTTP request body into
+the `LoanApplicationRequestDTO` instance.
+
+The method body begins by calling `logger.info("Received loan application
+submission request for applicant: {}", requestDTO.getApplicantId())`, which
+writes a structured INFO-level log entry recording the applicant identifier
+from the incoming request. The `{}` placeholder is substituted with the value
+returned by `requestDTO.getApplicantId()` at log time.
+
+A local variable `responseDTO` of type `LoanApplicationResponseDTO` is then
+declared. Control transfers out of this chunk to
+`loanApplicationService.submitApplication(requestDTO)`, passing the fully
+validated `requestDTO` as the sole argument. The returned
+`LoanApplicationResponseDTO` â representing the newly created application
+record â is assigned to `responseDTO`. No exception handling is defined at
+this level; any exception thrown by the service layer propagates upward to the
+global exception handler.
+
+A second log call writes `logger.info("Loan application created successfully
+with reference: {}", responseDTO.getApplicationReference())`, substituting the
+newly assigned application reference returned in `responseDTO`, providing an
+audit trail of successful submissions.
+
+The method then constructs and returns a `ResponseEntity` by calling
+`ResponseEntity.status(HttpStatus.CREATED).body(responseDTO)`. The
+`HttpStatus.CREATED` constant corresponds to HTTP status code 201,
+communicating to the caller that a new resource was successfully created. The
+`responseDTO` object is placed as the response body. This `ResponseEntity` is
+returned as the HTTP response to the client. No null check is applied to
+`responseDTO` before returning.
+
+**Entry Point â `getApplicationByReference(String applicationReference)`**
+
+The method `getApplicationByReference` is declared `public` and returns
+`ResponseEntity<LoanApplicationResponseDTO>`. It carries
+`@GetMapping("/{applicationReference}")`, mapping it to `GET /api/v1/loan-
+applications/{applicationReference}`. The parameter `applicationReference` is
+of type `String`, annotated with `@PathVariable`, meaning Spring extracts it
+from the `{applicationReference}` segment of the request URI. No `@Valid` is
+applied to this parameter; no Bean Validation constraints are declared for
+this path variable.
+
+The method calls `logger.info("Fetching loan application with reference: {}",
+applicationReference)`, logging the reference being looked up. A local
+variable `responseDTO` of type `LoanApplicationResponseDTO` is declared.
+Control transfers out to
+`loanApplicationService.getApplicationByReference(applicationReference)`,
+passing the extracted reference string. The returned
+`LoanApplicationResponseDTO` is assigned to `responseDTO`. No exception
+handling is defined here; service-layer exceptions propagate to the global
+handler.
+
+The method constructs and returns `ResponseEntity.ok(responseDTO)`, wrapping
+`responseDTO` in a 200 OK response. The `responseDTO` object becomes the
+serialized response body. No null check on `responseDTO` is performed before
+returning.
+
+**Entry Point â `getApplicationsByApplicant(String applicantId, int page,
+int size)`**
+
+The method `getApplicationsByApplicant` is declared `public` and returns
+`ResponseEntity<List<LoanApplicationResponseDTO>>`. It carries
+`@GetMapping("/applicant/{applicantId}")`, mapping it to `GET /api/v1/loan-
+applications/applicant/{applicantId}`. It accepts three parameters:
+`applicantId` of type `String` annotated with `@PathVariable`, extracting the
+borrower's identifier from the URI; `page` of type `int` annotated with
+`@RequestParam(defaultValue = "0")`, extracting the page number from the query
+string and defaulting to `0` (the first page) if absent; and `size` of type
+`int` annotated with `@RequestParam(defaultValue = "10")`, extracting the page
+size from the query string and defaulting to `10` records per page if absent.
+The literal `"0"` and `"10"` represent the institution's default pagination
+policy.
+
+The method calls `logger.info("Fetching applications for applicant: {}, page:
+{}, size: {}", applicantId, page, size)`, logging all three parameters for
+traceability. A local variable `applications` of type
+`List<LoanApplicationResponseDTO>` is declared. Control transfers out to
+`loanApplicationService.getApplicationsByApplicant(applicantId, page, size)`,
+passing the applicant identifier, the page index, and the page size. The
+returned list is assigned to `applications`. No exception handling is defined
+here.
+
+The method returns `ResponseEntity.ok(applications)`, wrapping the list in a
+200 OK response. The `applications` list is serialized as a JSON array in the
+response body. No null check on `applications` is performed before returning.
+
+**Entry Point â `updateApplicationStatus(String applicationReference,
+LoanStatusUpdateRequestDTO statusUpdateRequest)`**
+
+The method `updateApplicationStatus` is declared `public` and returns
+`ResponseEntity<LoanApplicationResponseDTO>`. It carries
+`@PutMapping("/{applicationReference}/status")`, mapping it to `PUT
+/api/v1/loan-applications/{applicationReference}/status`. It accepts two
+parameters: `applicationReference` of type `String` annotated with
+`@PathVariable`, extracting the target application reference from the URI; and
+`statusUpdateRequest` of type `LoanStatusUpdateRequestDTO` annotated with
+`@Valid` â triggering Bean Validation on the deserialized body â and
+`@RequestBody` â deserializing the HTTP request body into the DTO.
+
+The method calls `logger.info("Updating status for application: {} to: {}",
+applicationReference, statusUpdateRequest.getNewStatus())`, logging both the
+target application reference and the new status being requested. A local
+variable `responseDTO` of type `LoanApplicationResponseDTO` is declared.
+Control transfers out to
+`loanApplicationService.updateApplicationStatus(applicationReference,
+statusUpdateRequest)`, passing both the reference and the fully validated
+status update request. The returned `LoanApplicationResponseDTO` representing
+the application after the status change is assigned to `responseDTO`. No
+exception handling is defined at this level.
+
+The method returns `ResponseEntity.ok(responseDTO)`, wrapping the updated
+application DTO in a 200 OK response. No null check on `responseDTO` is
+performed before returning.
+
+No exception handling is present in any method of this controller. All
+exceptions thrown by the service layer are expected to be handled by the
+global `@ControllerAdvice` exception handler. No input sanitization or
+secondary validation beyond Bean Validation is performed in this class. No
+transaction management is applied; transactions are managed at the service
+layer.

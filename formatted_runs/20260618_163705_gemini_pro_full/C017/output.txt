@@ -1,0 +1,116 @@
+business_functional_name: |
+Administrative Override Execution
+
+core_business_functionality: |
+Executes manual overrides initiated by administrators, transitioning claims
+into terminal approval or denial states. Ensures claims are eligible for
+override and triggers corresponding financial actions upon approval.
+
+business_function: 
+  - Validates that a claim exists before attempting an override.
+  - Validates that a claim is not already finalized before altering its status.
+  - Updates the claim status to an approved state and saves it.
+  - Triggers the financial payment process for approved claims.
+  - Updates the claim status to a denied state and records the justification.
+
+business_functions_list: 
+  - Validate Existence
+  - Validate State
+  - Authorize Status
+  - Trigger Payment
+  - Deny Status
+
+business_rules: 
+  - rule_id: "C017_BR1"
+
+rule: "If an administrative override targets a claim that does not exist in the system, the operation must abort and return a not-found error."
+
+condition: "Target claim record is not found in the database"
+
+action: "Abort and throw an error"
+
+occurrence: "C017_BR1"
+
+source_chunks: ["C017"]
+
+  - rule_id: "C017_BR2"
+
+rule: "If an administrative override attempts to alter a claim that has already reached a finalized, terminal state, the operation is blocked to prevent historical alterations."
+
+condition: "Claim is currently in a terminal state"
+
+action: "Abort and throw a state error"
+
+occurrence: "C017_BR2"
+
+source_chunks: ["C017"]
+
+  - rule_id: "C017_BR3"
+
+rule: "When a claim is successfully forced into an approved state, a payment process must be immediately initiated for the total claim amount."
+
+condition: "Claim status is successfully set to approved"
+
+action: "Initiate payment"
+
+occurrence: "C017_BR3"
+
+source_chunks: ["C017"]
+
+Imports
+This chunk imports `ClaimResponse` from the `com.acme.insurance.claims.dto`
+layer for response formatting. It imports `ClaimRecord` and `ClaimRepository`
+from internal layers for entity access. It imports `ClaimRoutingService` and
+`PaymentService` from the service layer to define its interface and call
+dependencies. It imports `ClaimSystemException` from the exception layer, and
+Spring annotations `@Service` and `@Transactional`.
+
+Class-Level Declarations
+The `ClaimRoutingServiceImpl` class is annotated with `@Service`. It declares
+two private, final injected dependencies: `claimRepository` of type
+`ClaimRepository`, and `paymentService` of type `PaymentService`, both
+initialized via a constructor.
+
+Primary Flow: forceApprove
+The `forceApprove` method is annotated with `@Transactional`, enforcing an
+atomic database operation. It returns a `ClaimResponse` and accepts a `String`
+named `claimId`.
+
+It declares a local variable `record` of type `ClaimRecord`. It assigns this
+variable the result of the external data access call
+`claimRepository.findById(claimId)`. If the record is absent, the chained
+`.orElseThrow()` immediately throws a `ClaimSystemException` with the literal
+code `"E_NF_001"` and aborts execution.
+
+An `if` statement checks the evaluated result of the internal call
+`record.isTerminalState()`. If this condition is true (meaning it is already
+finalized), it throws a `ClaimSystemException` with the code `"E_STATE_001"`
+and aborts. If false, execution continues.
+
+The method assigns the literal value `"APPROVED"` via
+`record.setStatus("APPROVED")`. It calls the external repository method
+`claimRepository.save(record)` to persist the change. It then makes an
+external cross-chunk call to
+`paymentService.initiatePayment(record.getClaimId(),
+record.getClaimAmount())`. Control transfers out to the payment service,
+passing the ID and amount, and returns.
+
+It declares a local variable `response` of type `ClaimResponse`, assigns the
+claim ID and status from the record, and returns the `response`.
+
+Supporting Elements in This Chunk
+The `forceReject` method is annotated with `@Transactional`. It returns a
+`ClaimResponse` and accepts a `String` `claimId` and a `String` `reason`.
+
+It declares a local variable `record` and retrieves it via
+`claimRepository.findById(claimId).orElseThrow()`, aborting with `"E_NF_001"`
+if not found. An `if` statement checks `record.isTerminalState()`. If true, it
+throws `"E_STATE_001"` and aborts. If false, execution continues.
+
+The method assigns the literal value `"DENIED"` via
+`record.setStatus("DENIED")`. It persists the change via
+`claimRepository.save(record)`.
+
+It constructs a `ClaimResponse` named `response`, sets the ID and status, and
+maps the justification by calling `response.setErrorMessage("Manually
+rejected: " + reason)`. It then returns the `response`.

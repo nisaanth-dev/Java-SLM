@@ -1,0 +1,581 @@
+business_functional_name: |
+Loan Application Lifecycle Management And Event Dispatch
+
+core_business_functionality: |
+This component is the authoritative business logic centre for all loan
+application operations, responsible for validating, persisting, and tracking
+the full lifecycle of a loan from initial submission through to final status.
+It enforces the organisation's rules governing permissible status transitions
+and business data integrity, and signals significant lifecycle events to
+downstream consumers upon application creation.
+
+business_function: |
+A new loan application is validated against the organisation's business rules,
+assigned a unique reference identifier, persisted in the system of record, and
+a lifecycle event is dispatched to notify downstream systems of the
+submission.
+A single loan application is retrieved by its unique reference, with an
+explicit failure raised when no matching record exists.
+All loan applications belonging to a specific applicant are retrieved as a
+complete collection and converted into the standard response representation.
+The recorded status of a loan application is advanced to a specified new value
+after confirming the transition is permitted, with the approval timestamp
+captured when the application moves to approved standing.
+The current status of a loan application is retrieved in isolation for
+lightweight inspection without loading full application data.
+Submitted loan data is examined against mandatory field requirements â
+amount, term, and stated purpose â and rejected with a precise explanation
+when any requirement is unmet.
+
+business_functions_list: 
+  - Submit Application
+  - Validate Submission
+  - Assign Application Reference
+  - Record Application
+  - Dispatch Lifecycle Event
+  - Retrieve Application
+  - List Applicant Applications
+  - Advance Application Status
+  - Capture Approval Timestamp
+  - Poll Application Status
+  - Reject Invalid Application
+
+business_rules: 
+  - rule_id: "C002_BR1"
+
+rule: "The requested loan amount must be a positive monetary value; any submission specifying a zero, negative, or absent amount is refused with an explanation citing the received value."
+
+condition: "The requested loan amount is absent or is zero or negative."
+
+action: "The submission is rejected and the invalid amount is cited in the refusal message."
+
+occurrence: "C002_BR1"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR2"
+
+rule: "The requested loan repayment term must fall within the range of 1 to 360 months inclusive; any submission specifying a term outside this range or omitting it entirely is refused."
+
+condition: "The requested repayment term is absent, less than 1 month, or greater than 360 months."
+
+action: "The submission is rejected and the invalid term value is cited in the refusal message."
+
+occurrence: "C002_BR2"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR3"
+
+rule: "Every loan application must state the purpose for which the loan is sought; submissions that omit or blank out the purpose are refused."
+
+condition: "The stated loan purpose is absent or contains only whitespace."
+
+action: "The submission is rejected with a message stating that loan purpose must not be blank."
+
+occurrence: "C002_BR3"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR4"
+
+rule: "A loan application's status may only be changed to one of the nine recognised lifecycle values: Submitted, Under Review, Credit Check Pending, Credit Check Passed, Credit Check Failed, Approved, Rejected, Disbursed, or Cancelled; any other value is refused."
+
+condition: "The requested new status is not among the nine permitted lifecycle values."
+
+action: "The status update is rejected with a message listing the permitted values."
+
+occurrence: "C002_BR4"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR5"
+
+rule: "Once a loan application has reached a terminal state â either Cancelled or Disbursed â its status may not be changed further under any circumstances."
+
+condition: "The application is already in Cancelled or Disbursed status at the time a status change is requested."
+
+action: "The status update is refused, citing the terminal status and the application reference."
+
+occurrence: "C002_BR5"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR6"
+
+rule: "When a loan application is moved to Approved standing for the first time, the exact date and time of that approval decision must be recorded against the application."
+
+condition: "The new status is Approved and the application was not already in Approved status."
+
+action: "The approval timestamp is recorded on the application at the moment of the status change."
+
+occurrence: "C002_BR6"
+
+source_chunks: ["C002"]
+
+---
+
+**Technical Narrative**
+
+**Imports and Class-Level Structure**
+
+The source file is in the package `com.meridian.loanorigination.service`,
+placing this class in the service layer of the Meridian Loan Origination
+Platform.
+
+The import block brings in the following in-application classes.
+`LoanApplicationRequestDTO`, `LoanApplicationResponseDTO`, and
+`LoanStatusResponseDTO` are all from the DTO layer
+(`com.meridian.loanorigination.dto`) and supply the inbound request
+representation and the two distinct outbound response shapes used throughout
+this class. `LoanApplication` is imported from
+`com.meridian.loanorigination.entity`, the entity layer, and is the JPA-
+managed persistent representation of a loan application.
+`LoanApplicationNotFoundException` and `LoanValidationException` are from the
+exception layer (`com.meridian.loanorigination.exception`) and represent,
+respectively, the condition of a non-existent application reference and the
+condition of a request that violates business validation rules.
+`LoanApplicationMapper` is from `com.meridian.loanorigination.mapper`, the
+mapper layer, and performs bidirectional conversion between `LoanApplication`
+entities and DTO representations. `LoanApplicationRepository` is from
+`com.meridian.loanorigination.repository`, the repository layer, and is the
+data access interface for persisting and querying `LoanApplication` records.
+`LoanApplicationSubmittedEvent` is from `com.meridian.loanorigination.event`,
+the event layer, and is the application event published when a new application
+is successfully submitted.
+
+From Lombok, `RequiredArgsConstructor` generates a constructor for all `final`
+fields, enabling constructor injection; `Slf4j` provides the `log` logger
+field. From Spring, `ApplicationEventPublisher` enables publishing of
+application events to the Spring event infrastructure; `Service` marks the
+class as a service-layer bean; `Transactional` controls database transaction
+boundaries at the method level. From the Java standard library, `Arrays`
+supports the construction of the constant list; `List` is the return and
+storage type for collections; `Optional` mediates the repository's nullable-
+or-absent lookup result; `UUID` generates unique identifiers; `LocalDateTime`
+captures timestamps; `Collectors` provides the terminal stream collector.
+
+The class `LoanApplicationService` carries three class-level annotations.
+`@Service` registers this class as a Spring-managed service bean.
+`@RequiredArgsConstructor` generates a constructor accepting the three `final`
+fields in declaration order: `loanApplicationRepository`,
+`loanApplicationMapper`, and `eventPublisher`. `@Slf4j` provides the `log`
+logger.
+
+**Class-level constants and fields:**
+
+The constant `VALID_STATUS_TRANSITIONS` is declared `private static final` as
+a `List<String>`, initialised via `Arrays.asList(...)` with the nine string
+literals: `"SUBMITTED"`, `"UNDER_REVIEW"`, `"CREDIT_CHECK_PENDING"`,
+`"CREDIT_CHECK_PASSED"`, `"CREDIT_CHECK_FAILED"`, `"APPROVED"`, `"REJECTED"`,
+`"DISBURSED"`, and `"CANCELLED"`. These nine values constitute the exhaustive
+set of lifecycle statuses that the organisation recognises as valid for a loan
+application; any requested status not in this list is refused.
+
+The constant `STATUS_SUBMITTED` is declared `private static final String` with
+the value `"SUBMITTED"`. It encodes the initial status assigned to every newly
+created loan application.
+
+The constant `STATUS_CANCELLED` is declared `private static final String` with
+the value `"CANCELLED"`. It encodes one of the two terminal statuses from
+which no further status transition is permitted.
+
+The constant `STATUS_DISBURSED` is declared `private static final String` with
+the value `"DISBURSED"`. It encodes the second terminal status from which no
+further transition is permitted.
+
+The constant `STATUS_APPROVED` is declared `private static final String` with
+the value `"APPROVED"`. It encodes the status signifying a favourable
+underwriting decision and triggers approval timestamp recording.
+
+The field `loanApplicationRepository` is declared `private final` of type
+`LoanApplicationRepository`. Its business role is persistence and querying of
+loan application records. It is supplied via the Lombok-generated constructor.
+
+The field `loanApplicationMapper` is declared `private final` of type
+`LoanApplicationMapper`. Its business role is conversion between
+`LoanApplication` entities and their DTO representations. Supplied via the
+generated constructor.
+
+The field `eventPublisher` is declared `private final` of type
+`ApplicationEventPublisher`. Its business role is to publish lifecycle events
+â specifically the `LoanApplicationSubmittedEvent` â to the Spring event
+infrastructure, notifying downstream listeners. Supplied via the generated
+constructor.
+
+---
+
+**Primary Flow: `submitApplication`**
+
+The primary method is `submitApplication`, declared `public` with return type
+`LoanApplicationResponseDTO`, accepting a single parameter `requestDTO` of
+type `LoanApplicationRequestDTO`. The method is annotated `@Transactional`
+(with default settings: read-write, propagation REQUIRED), meaning it executes
+within a database transaction; if an unchecked exception escapes the method,
+the transaction is rolled back automatically.
+
+Execution begins with an info-level log recording `"Processing loan
+application submission for applicant: {}"` with
+`requestDTO.getApplicantNationalId()`.
+
+The method then calls `validateLoanRequest(requestDTO)` â an internal method
+defined in this chunk. Control passes to `validateLoanRequest`; its full logic
+is narrated below under its own heading. If `validateLoanRequest` completes
+without throwing an exception, control returns here and execution continues.
+If `validateLoanRequest` throws a `LoanValidationException`, that exception
+propagates out of `submitApplication` immediately, the transaction is marked
+for rollback, and no further steps in this method execute.
+
+On return from `validateLoanRequest`, a local variable `applicationReference`
+of type `String` is declared and assigned the value constructed by
+concatenating the literal `"LN-"` with the result of
+`UUID.randomUUID().toString().toUpperCase()`. This produces a unique,
+uppercase loan reference string in the format `"LN-"` followed by a random
+UUID (e.g., `"LN-3F2A..."`). This reference is the primary business identifier
+for the application throughout its lifecycle.
+
+A local variable `loanApplication` of type `LoanApplication` is declared and
+populated by the return value of `loanApplicationMapper.toEntity(requestDTO)`.
+The argument is the full `requestDTO`. Control transfers to the mapper layer's
+`toEntity` operation; its result â a `LoanApplication` entity populated from
+the DTO's fields â returns here and is assigned to `loanApplication`. The
+mapper's internal conversion logic belongs to its own chunk's narrative.
+
+The method then sets four fields on `loanApplication` directly.
+`loanApplication.setApplicationReference(applicationReference)` assigns the
+generated reference string as the entity's unique business identifier.
+`loanApplication.setStatus(STATUS_SUBMITTED)` assigns the literal value
+`"SUBMITTED"` as the initial lifecycle status, encoding the business policy
+that every newly created application begins in submitted state.
+`loanApplication.setSubmittedAt(LocalDateTime.now())` records the current
+system timestamp as the submission datetime.
+`loanApplication.setLastModifiedAt(LocalDateTime.now())` records the current
+system timestamp as the last modification datetime, initialised to match the
+submission time.
+
+A local variable `savedApplication` of type `LoanApplication` is declared and
+assigned the return value of
+`loanApplicationRepository.save(loanApplication)`. The argument is the fully
+initialised `loanApplication` entity. Control transfers to the repository
+layer's `save` operation; the returned managed entity â now with any
+database-generated values populated (such as a surrogate key) â returns here
+and is assigned to `savedApplication`. The repository's persistence logic
+belongs to its own chunk's narrative.
+
+An info-level log records `"Loan application persisted with reference: {} and
+status: {}"` with `savedApplication.getApplicationReference()` and
+`savedApplication.getStatus()` as arguments.
+
+A local variable `event` of type `LoanApplicationSubmittedEvent` is
+constructed with `new LoanApplicationSubmittedEvent(this,
+savedApplication.getApplicationReference(),
+savedApplication.getApplicantNationalId(),
+savedApplication.getRequestedAmount())`. The four constructor arguments are:
+`this` (the current service instance, used as the event source), the persisted
+application reference, the applicant's national ID, and the requested loan
+amount. This object represents the business fact that a new application has
+entered the origination pipeline and carries the key identifiers needed by
+downstream consumers.
+
+`eventPublisher.publishEvent(event)` is then called with `event` as the
+argument. Control transfers to the Spring event infrastructure, which
+dispatches the event to all registered listeners for
+`LoanApplicationSubmittedEvent`. The dispatching is synchronous by default â
+listeners execute before control returns here. The internal behaviour of any
+listeners belongs to their own chunk's narrative.
+
+An info-level log records `"LoanApplicationSubmittedEvent published for
+reference: {}"` with `savedApplication.getApplicationReference()`.
+
+The method returns `loanApplicationMapper.toResponseDTO(savedApplication)`.
+The argument is the persisted `savedApplication` entity. Control transfers to
+the mapper layer's `toResponseDTO` operation; its result â a fully populated
+`LoanApplicationResponseDTO` â is immediately returned to the caller. This
+return is the terminal outcome of a successful submission: a response DTO
+representing the newly created application.
+
+No `try/catch` block wraps this method's body. Any `LoanValidationException`
+thrown by `validateLoanRequest` propagates uncaught; any runtime exception
+from the repository or event publisher likewise propagates uncaught. The
+`@Transactional` boundary ensures automatic rollback on unchecked exceptions.
+No `finally` block is present.
+
+---
+
+**`validateLoanRequest` (internal method â called by `submitApplication`)**
+
+The method `validateLoanRequest` is declared `private` with return type
+`void`, accepting a single parameter `requestDTO` of type
+`LoanApplicationRequestDTO`. It contains no annotations. Its sole purpose is
+to enforce the three mandatory business data rules before a loan application
+is persisted.
+
+The first `if` statement checks whether `requestDTO.getRequestedAmount()` is
+`null` OR whether `requestDTO.getRequestedAmount().signum()` is less than or
+equal to `0`. The `signum()` method returns `-1` for negative values, `0` for
+zero, and `1` for positive; a result `<= 0` means the amount is zero or
+negative. If either condition is true â meaning the amount is absent, zero,
+or negative â a `LoanValidationException` is thrown. The exception message
+is constructed by concatenating the literal `"Requested loan amount must be a
+positive value. Received: "` with `requestDTO.getRequestedAmount()`. The throw
+terminates this method immediately and propagates the exception to the caller
+(`submitApplication`). If both conditions are false â meaning the amount is
+a non-null positive value â the `if` branch is not entered and execution
+continues to the next statement.
+
+The second `if` statement checks whether `requestDTO.getLoanTermMonths()` is
+`null` OR whether `requestDTO.getLoanTermMonths()` is less than `1` OR whether
+`requestDTO.getLoanTermMonths()` is greater than `360`. If any sub-condition
+is true â meaning the term is absent or outside the range 1â360 â a
+`LoanValidationException` is thrown. The message concatenates `"Loan term must
+be between 1 and 360 months. Received: "` with
+`requestDTO.getLoanTermMonths()`. The throw terminates this method. If all
+sub-conditions are false â meaning the term is a non-null integer within
+1â360 inclusive â execution continues.
+
+The third `if` statement checks whether `requestDTO.getLoanPurpose()` is
+`null` OR whether `requestDTO.getLoanPurpose().isBlank()` is `true`. If either
+condition is true â meaning the purpose is absent or contains only
+whitespace â a `LoanValidationException` is thrown with the literal message
+`"Loan purpose must not be blank."`. The throw terminates this method. If both
+conditions are false â meaning the purpose is a non-null, non-blank string
+â execution continues.
+
+If all three `if` statements are passed without throwing, a debug-level log
+records `"Loan application request validation passed for applicant: {}"` with
+`requestDTO.getApplicantNationalId()`. The method returns `void` â returning
+control to `submitApplication` at the point immediately after the
+`validateLoanRequest(requestDTO)` call.
+
+No `try/catch` block is present in `validateLoanRequest`. No `finally` block
+is present.
+
+---
+
+**Supporting Elements in This Chunk**
+
+**`getApplicationByReference`**
+
+The method `getApplicationByReference` is declared `public` with return type
+`LoanApplicationResponseDTO`, accepting one parameter `applicationReference`
+of type `String`. It is annotated `@Transactional(readOnly = true)`,
+establishing a read-only transaction boundary that signals to the database and
+Spring infrastructure that no writes will occur, potentially enabling
+optimisations.
+
+Execution begins with an info-level log recording `"Retrieving loan
+application by reference: {}"` with `applicationReference`.
+
+A local variable `loanApplication` of type `LoanApplication` is declared and
+assigned the result of the expression `loanApplicationRepository.findByApplica
+tionReference(applicationReference).orElseThrow(...)`. Control transfers to
+the repository layer's `findByApplicationReference` operation, passing
+`applicationReference` as the lookup key. The operation returns an
+`Optional<LoanApplication>`. If the `Optional` is empty â meaning no record
+exists for this reference â `orElseThrow` triggers a lambda that constructs
+and throws a `LoanApplicationNotFoundException` with the message `"Loan
+application not found for reference: "` concatenated with
+`applicationReference`. This throw exits the method immediately and propagates
+to the caller. If the `Optional` is present â meaning a matching record was
+found â `orElseThrow` unwraps it and assigns the `LoanApplication` entity to
+`loanApplication`.
+
+The method then returns
+`loanApplicationMapper.toResponseDTO(loanApplication)`. The argument is the
+retrieved entity. Control transfers to the mapper's conversion operation; its
+result â a `LoanApplicationResponseDTO` â is immediately returned to the
+caller. No `try/catch` or `finally` is present.
+
+**`getApplicationsByApplicantId`**
+
+The method `getApplicationsByApplicantId` is declared `public` with return
+type `List<LoanApplicationResponseDTO>`, accepting one parameter `nationalId`
+of type `String`. It is annotated `@Transactional(readOnly = true)`.
+
+Execution begins with an info-level log recording `"Retrieving all loan
+applications for applicant: {}"` with `nationalId`.
+
+A local variable `applications` of type `List<LoanApplication>` is declared
+and assigned the return value of
+`loanApplicationRepository.findAllByApplicantNationalId(nationalId)`. Control
+transfers to the repository layer; the returned list â which may be empty
+â is assigned to `applications`.
+
+The method then evaluates the stream expression `applications.stream().map(loa
+nApplicationMapper::toResponseDTO).collect(Collectors.toList())`. This
+iterates over every `LoanApplication` element in `applications`. For each
+element, it applies the method reference
+`loanApplicationMapper::toResponseDTO`, passing the element to the mapper's
+conversion operation; the result is a `LoanApplicationResponseDTO`. The stream
+terminal operation `collect(Collectors.toList())` assembles all converted DTOs
+into a new `List<LoanApplicationResponseDTO>`, which is returned to the
+caller. If `applications` is empty, the stream produces an empty list, which
+is returned. No `try/catch` or `finally` is present.
+
+**`updateApplicationStatus`**
+
+The method `updateApplicationStatus` is declared `public` with return type
+`LoanStatusResponseDTO`, accepting three parameters: `applicationReference` of
+type `String`, `newStatus` of type `String`, and `remarks` of type `String`
+(which may be `null`). It is annotated `@Transactional` (read-write).
+
+Execution begins with an info-level log recording `"Updating loan application
+status: reference={}, newStatus={}"` with `applicationReference` and
+`newStatus`.
+
+An `if` statement checks whether
+`VALID_STATUS_TRANSITIONS.contains(newStatus)` is `false` â meaning the
+requested `newStatus` value is not among the nine permitted lifecycle values
+held in the `VALID_STATUS_TRANSITIONS` constant. If this condition is true, a
+`LoanValidationException` is thrown. The message concatenates `"Invalid status
+value: '"`, `newStatus`, `"'. Must be one of: "`, and
+`VALID_STATUS_TRANSITIONS` (which renders as the full list). The throw exits
+the method. If the condition is false â meaning `newStatus` is a valid value
+â execution continues.
+
+A local variable `loanApplication` of type `LoanApplication` is declared and
+assigned via `loanApplicationRepository.findByApplicationReference(application
+Reference).orElseThrow(...)`. If no record exists for `applicationReference`,
+a `LoanApplicationNotFoundException` is thrown with the message `"Loan
+application not found for reference: "` concatenated with
+`applicationReference`, exiting the method. Otherwise, the found entity is
+assigned to `loanApplication`.
+
+A local variable `previousStatus` of type `String` is declared and assigned
+`loanApplication.getStatus()`. This captures the application's current status
+before any modification, enabling it to be recorded in the response and used
+in subsequent guards.
+
+An `if` statement checks whether `STATUS_CANCELLED.equals(previousStatus)` is
+`true` OR whether `STATUS_DISBURSED.equals(previousStatus)` is `true`. If
+either is true â meaning the application is already in a terminal state â
+a `LoanValidationException` is thrown. The message concatenates `"Cannot
+change status of a loan application that is already "`, `previousStatus`, `".
+Application reference: "`, and `applicationReference`. The throw exits the
+method. If both conditions are false â meaning the application is not in a
+terminal state â execution continues.
+
+A second `if` statement checks whether `STATUS_APPROVED.equals(newStatus)` is
+`true` AND whether `STATUS_APPROVED.equals(previousStatus)` is `false`. If
+both are true â meaning the application is transitioning into `"APPROVED"`
+status for the first time â
+`loanApplication.setApprovedAt(LocalDateTime.now())` is called, recording the
+current system timestamp as the approval datetime. If either condition is
+false â the new status is not `"APPROVED"`, or the application was already
+in `"APPROVED"` status â this block is skipped and no approval timestamp is
+set.
+
+Regardless of the approval branch outcome, the method then sets three fields
+on `loanApplication`: `loanApplication.setStatus(newStatus)` advances the
+status to the requested value; `loanApplication.setRemarks(remarks)` records
+the optional remarks string (which may be `null`);
+`loanApplication.setLastModifiedAt(LocalDateTime.now())` records the current
+timestamp as the last modification time.
+
+A local variable `updatedApplication` of type `LoanApplication` is declared
+and assigned the return value of
+`loanApplicationRepository.save(loanApplication)`. Control transfers to the
+repository's `save` operation; the returned updated entity is assigned to
+`updatedApplication`.
+
+An info-level log records `"Loan application {} status changed from {} to {}"`
+with `applicationReference`, `previousStatus`, and `newStatus`.
+
+A local variable `statusResponse` of type `LoanStatusResponseDTO` is
+constructed with `new LoanStatusResponseDTO()`. Five fields are then set on
+it: `statusResponse.setApplicationReference(updatedApplication.getApplicationR
+eference())` assigns the reference;
+`statusResponse.setStatus(updatedApplication.getStatus())` assigns the new
+status; `statusResponse.setPreviousStatus(previousStatus)` assigns the
+captured prior status;
+`statusResponse.setRemarks(updatedApplication.getRemarks())` assigns the
+remarks;
+`statusResponse.setLastModifiedAt(updatedApplication.getLastModifiedAt())`
+assigns the last modification timestamp. The method then returns
+`statusResponse` to the caller. No `try/catch` or `finally` is present.
+
+**`getApplicationStatus`**
+
+The method `getApplicationStatus` is declared `public` with return type
+`LoanStatusResponseDTO`, accepting one parameter `applicationReference` of
+type `String`. It is annotated `@Transactional(readOnly = true)`.
+
+Execution begins with an info-level log recording `"Retrieving status for loan
+application: {}"` with `applicationReference`.
+
+A local variable `loanApplication` of type `LoanApplication` is declared and
+assigned via `loanApplicationRepository.findByApplicationReference(application
+Reference).orElseThrow(...)`. If no record exists, a
+`LoanApplicationNotFoundException` is thrown with the message `"Loan
+application not found for reference: "` concatenated with
+`applicationReference`, exiting the method. Otherwise, the found entity is
+assigned.
+
+A local variable `statusResponse` of type `LoanStatusResponseDTO` is
+constructed with `new LoanStatusResponseDTO()`. Four fields are set: `statusRe
+sponse.setApplicationReference(loanApplication.getApplicationReference())`,
+`statusResponse.setStatus(loanApplication.getStatus())`,
+`statusResponse.setRemarks(loanApplication.getRemarks())`, and
+`statusResponse.setLastModifiedAt(loanApplication.getLastModifiedAt())`. The
+method returns `statusResponse` to the caller. No `try/catch` or `finally` is
+present.
+
+---
+
+**Self-Review**
+
+**Rules followed:**
+Execution-Trace Mode was applied, as this is a `Service` chunk with
+`ENTRY_POINT: no`. The two-stage walk from Â§3.4.1 was applied:
+`submitApplication` was selected as the primary method because it is the most
+operationally complete entry point â it coordinates validation, persistence,
+and event dispatch, representing the chunk's principal business behaviour. The
+internal method `validateLoanRequest` was narrated recursively within the
+primary flow per Â§3.4.2, with explicit return-to-caller noted. All remaining
+public methods (`getApplicationByReference`, `getApplicationsByApplicantId`,
+`updateApplicationStatus`, `getApplicationStatus`) were placed under
+Supporting Elements. The establish-once principle (Â§3.4.0) was applied:
+`log`, `loanApplicationRepository`, `loanApplicationMapper`, and
+`eventPublisher` are introduced at class level and referenced by name
+thereafter. `@RequiredArgsConstructor` and `@Slf4j` are explained once at
+class level. The `@Transactional` annotation's default semantics (read-write,
+propagation REQUIRED, automatic rollback on unchecked exceptions) are
+explained at first occurrence on `submitApplication` and subsequently only the
+differing attribute (`readOnly = true`) is noted for read-only methods. All
+class-level constants are individually narrated with their literal values and
+business meaning. Every branch in `updateApplicationStatus` â the valid-
+status guard, the terminal-status guard, and the approval-timestamp branch â
+is described with both true and false paths per Â§3.4.5. The stream operation
+in `getApplicationsByApplicantId` is narrated as a loop equivalent per Â§3.3.
+All `orElseThrow` patterns are described as conditional exception-throwing per
+Â§3.4.3. All `LoanValidationException` and `LoanApplicationNotFoundException`
+throws include the exception type, triggering condition, and outcome per
+Â§3.3. Absence of `try/catch` blocks is noted per Â§3.4.8 for each method.
+Verbatim naming (Â§3.6) is observed throughout.
+
+**Gaps or uncertainties identified:**
+The `@Transactional` rollback behaviour for the `updateApplicationStatus`
+method in the event that `loanApplicationRepository.save` throws a runtime
+exception is implied by Spring's default rollback rules but not stated
+explicitly for that specific call in the narrative â the save call is
+described without noting that a failure there would trigger rollback. This is
+a minor gap. The `Optional` type returned by `findByApplicationReference` is
+mentioned in `getApplicationByReference` but its presence is implied rather
+than formally named in the `updateApplicationStatus` and
+`getApplicationStatus` Supporting Elements entries (those entries describe
+`orElseThrow` directly without re-mentioning `Optional`); this is consistent
+with the establish-once principle but could be seen as an omission by a reader
+encountering `updateApplicationStatus` first.
+
+**Duplication check:**
+The `orElseThrow` pattern and the associated
+`LoanApplicationNotFoundException` construction appear in
+`getApplicationByReference`, `updateApplicationStatus`, and
+`getApplicationStatus`. However, each occurrence is within a distinct method's
+entry in Supporting Elements and describes a distinct lookup operation on a
+distinct parameter; they are not the same explanation repeated within one
+continuous flow. The establish-once principle is satisfied by explaining the
+mechanism in full at its first occurrence (`getApplicationByReference`) and
+referencing it by its constituent parts (method name + exception type +
+message) in subsequent methods. No phrase or mechanism is re-explained in a
+way that violates the establish-once rule.

@@ -1,0 +1,138 @@
+business_functional_name: |
+Applicant Data Access By Identity And Contact
+
+core_business_functionality: |
+This chunk defines how applicant records are retrieved from storage using
+their national identification number or email address, and how the system can
+check whether an applicant with a given national identification number already
+exists. It serves as the persistence layer's contract for applicant lookups by
+identity used elsewhere in the system.
+
+business_function: |
+An applicant can be retrieved by their national identification number.
+The system can check whether an applicant with a given national identification
+number is already registered.
+An applicant can be retrieved by their email address.
+
+business_functions_list: 
+  - Retrieve By National Id
+  - Check National Id Exists
+  - Retrieve By Email
+
+business_rules: 
+  - rule_id: "C010_BR1"
+
+rule: "Each applicant can be uniquely located in the system using their national identification number."
+
+condition: "A national identification number is provided to look up an applicant"
+
+action: "The applicant record matching that national identification number, if any, is returned"
+
+occurrence: "C010_BR1"
+
+source_chunks: ["C010"]
+
+  - rule_id: "C010_BR2"
+
+rule: "The organization can determine, without retrieving the full applicant record, whether an applicant with a given national identification number is already registered."
+
+condition: "A national identification number is checked for existence among registered applicants"
+
+action: "A true or false indication of whether that national identification number is already registered is returned"
+
+occurrence: "C010_BR2"
+
+source_chunks: ["C010"]
+
+  - rule_id: "C010_BR3"
+
+rule: "Each applicant can be located in the system using their email address."
+
+condition: "An email address is provided to look up an applicant"
+
+action: "The applicant record matching that email address, if any, is returned"
+
+occurrence: "C010_BR3"
+
+source_chunks: ["C010"]
+---
+
+This chunk's imports bring in classes from across the application. From the
+entity layer (com.meridianbank.loanorigination.entity), Applicant is imported
+as the persistent entity type this repository manages. From external
+libraries: org.springframework.data.jpa.repository.JpaRepository provides the
+base interface giving this repository standard create, read, update, and
+delete operations (including findById, used in the second chunk's
+createApplication method via
+applicantRepository.findById(request.getApplicantId())) for the Applicant
+entity with a primary key of type Long;
+org.springframework.data.jpa.repository.Query provides the annotation used to
+declare a custom JPQL query on a repository method; and
+org.springframework.data.repository.query.Param provides the annotation used
+to bind a named method parameter to a named placeholder within a @Query
+annotation's query string. The import java.util.Optional provides the wrapper
+type returned by lookups that may or may not find a matching record.
+
+At the interface level, this interface extends JpaRepository<Applicant, Long>,
+meaning it automatically inherits standard data access operations for the
+Applicant entity â including findById (used in the second chunk to look up
+the applicant referenced by a loan application request) and save and findAll
+â without any of these inherited methods being declared explicitly in this
+chunk's code.
+
+This chunk declares three repository methods, each representing a distinct
+data access operation on applicant records.
+
+The method findByNationalIdNumber is declared returning Optional<Applicant>
+and takes one parameter, nationalIdNumber, of type String. This is a Spring
+Data JPA derived-query method: its name is parsed by Spring Data to
+automatically generate a query that finds the Applicant record whose
+nationalIdNumber field (declared in the fifth chunk, with a uniqueness
+constraint) equals the given nationalIdNumber value. In business terms, this
+method locates an applicant by their government-issued national identification
+number. Its return value is an Optional<Applicant> â populated with the
+matching applicant record if one exists, or empty if no applicant has that
+national identification number on file.
+
+The method existsByNationalIdNumber is declared returning boolean and takes
+one parameter, nationalIdNumber, of type String. This is a Spring Data JPA
+derived-query method: its name is parsed by Spring Data to automatically
+generate a query that checks for the existence of an Applicant record whose
+nationalIdNumber field equals the given nationalIdNumber value, without
+retrieving the full record. In business terms, this method answers whether an
+applicant with the given national identification number is already registered
+in the system. Its return value is true if at least one matching record
+exists, or false if none does.
+
+The method findByEmailAddress is declared returning Optional<Applicant> and
+takes one parameter, email, of type String (annotated with @Param("email")).
+It is annotated with @Query("SELECT a FROM Applicant a WHERE a.email =
+:email"), a JPQL query that selects the Applicant entity (aliased as a) where
+the entity's email field (declared in the fifth chunk) equals the bound
+parameter :email (matched to the email method parameter via @Param("email")).
+In business terms, this method locates an applicant by their registered
+contact email address. Its return value is an Optional<Applicant> â
+populated with the matching applicant record if one exists, or empty if no
+applicant has that email address on file.
+
+## Supporting Elements in This Chunk
+
+As this chunk is a repository interface declaring only method signatures (one
+with a custom @Query definition and two relying on Spring Data's derived-query
+mechanism), there is no single "primary flow" method in the execution-trace
+sense â each of the three declared methods, plus the inherited
+findById/save/findAll/etc. from JpaRepository, represents an independently-
+callable data access operation. All three declared methods have been fully
+narrated above, including their parameters, query semantics, and return
+values; none remain unreached. This section is included to confirm no
+additional unreached elements exist. Note that findByNationalIdNumber and
+existsByNationalIdNumber, while declared without bodies (per Spring Data JPA
+convention, where the implementation is generated automatically from the
+method name at runtime), have nonetheless been fully described in terms of
+their derived query behavior, parameters, and return values, satisfying the
+backend procedure / data access coverage requirement. Although
+findByNationalIdNumber and findByEmailAddress are declared here, neither is
+called within the chunks narrated so far (C001-C009); they represent data
+access operations available to other parts of the application (such as an
+applicant registration flow) not covered by the chunks generated to this
+point.

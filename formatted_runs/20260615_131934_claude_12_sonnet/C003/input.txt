@@ -1,0 +1,75 @@
+CHUNK_ID: C003
+
+APPLICATION: Meridian Loan Origination Platform
+
+SERVICE: loan-origination-service
+
+FILE: f01 (com.meridianbank.loanorigination.controller.LoanApplicationController) [continuation â does not redeclare imports]
+
+LAYER: Service
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+@Transactional
+public LoanDecisionResponse recordDecision(Long applicationId, String decisionOutcome) {
+    LoanApplication loanApplication = loanApplicationRepository.findById(applicationId)
+            .orElseThrow(() -> new LoanApplicationNotFoundException("Loan application not found for id: " + applicationId));
+
+    String previousStatus = loanApplication.getStatus();
+
+    if ("APPROVED".equals(previousStatus) || "REJECTED".equals(previousStatus)) {
+        throw new InvalidLoanStateException("Cannot change decision for application already in terminal status: " + previousStatus);
+    }
+
+    switch (decisionOutcome) {
+        case "APPROVED":
+            loanApplication.setStatus("APPROVED");
+            loanApplication.setApprovedAmount(loanApplication.getRequestedAmount());
+            loanApplication.setDecisionedAt(LocalDateTime.now());
+            break;
+        case "REJECTED":
+            loanApplication.setStatus("REJECTED");
+            loanApplication.setRejectionReason("Rejected during manual decision step");
+            loanApplication.setDecisionedAt(LocalDateTime.now());
+            break;
+        case "MANUAL_REVIEW":
+            loanApplication.setStatus("PENDING_MANUAL_REVIEW");
+            break;
+        default:
+            throw new InvalidLoanStateException("Unrecognized decision outcome: " + decisionOutcome);
+    }
+
+    LoanApplication updatedApplication = loanApplicationRepository.save(loanApplication);
+
+    LoanDecisionResponse decisionResponse = new LoanDecisionResponse();
+    decisionResponse.setApplicationId(updatedApplication.getId());
+    decisionResponse.setPreviousStatus(previousStatus);
+    decisionResponse.setNewStatus(updatedApplication.getStatus());
+    decisionResponse.setDecisionedAt(updatedApplication.getDecisionedAt());
+
+    if ("APPROVED".equals(updatedApplication.getStatus())) {
+        loanDecisionEventPublisher.publishLoanApprovedEvent(updatedApplication.getId(), updatedApplication.getApprovedAmount());
+    }
+
+    logger.info("Decision recorded for applicationId={}: {} -> {}", applicationId, previousStatus, updatedApplication.getStatus());
+
+    return decisionResponse;
+}
+
+public LoanApplicationResponse cancelApplication(Long applicationId) {
+    LoanApplication loanApplication = loanApplicationRepository.findById(applicationId)
+            .orElseThrow(() -> new LoanApplicationNotFoundException("Loan application not found for id: " + applicationId));
+
+    if ("APPROVED".equals(loanApplication.getStatus())) {
+        throw new InvalidLoanStateException("Cannot cancel an application that has already been approved");
+    }
+
+    loanApplication.setStatus("CANCELLED");
+    LoanApplication savedApplication = loanApplicationRepository.save(loanApplication);
+
+    logger.info("Application id={} cancelled by request", applicationId);
+
+    return loanApplicationMapper.toResponse(savedApplication);
+}

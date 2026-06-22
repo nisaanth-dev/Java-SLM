@@ -1,0 +1,259 @@
+business_functional_name: |
+Applicant Profile And Loan History Structure
+
+core_business_functionality: |
+This chunk defines the persistent record structure for a loan applicant,
+capturing their identity, contact, financial, and employment details, along
+with a link to all loan applications they have submitted. It also provides
+ways to calculate the applicant's current age and to determine whether they
+are considered employed.
+
+business_function: |
+Each applicant record stores their full name, national identification number,
+and date of birth.
+Each applicant record stores contact email, annual income, and employment
+status.
+Each applicant record stores when they were registered with the organization.
+Each applicant record links to every loan application they have submitted.
+An applicant's current age can be calculated from their date of birth.
+Whether an applicant is currently employed can be determined from their
+employment status.
+
+business_functions_list: 
+  - Store Applicant Identity
+  - Record Contact Details
+  - Record Financial Profile
+  - Track Loan History
+  - Record Registration Timing
+  - Calculate Applicant Age
+  - Determine Employment Status
+
+business_rules: 
+  - rule_id: "C005_BR1"
+
+rule: "Every applicant must have a full name, a national identification number, and a date of birth on record, and their national identification number must be unique across all applicants."
+
+condition: "An applicant record is being stored"
+
+action: "The record must include a full name, a unique national identification number, and a date of birth"
+
+occurrence: "C005_BR1"
+
+source_chunks: ["C005"]
+
+  - rule_id: "C005_BR2"
+
+rule: "If an applicant's registration date is not provided when their record is first created, the date and time of creation is used as their registration date."
+
+condition: "A new applicant record is being created and no registration date has been set"
+
+action: "The registration date is set to the current date and time"
+
+occurrence: "C005_BR2"
+
+source_chunks: ["C005"]
+
+  - rule_id: "C005_BR3"
+
+rule: "If an applicant's date of birth is not on record, their age cannot be determined and is treated as zero."
+
+condition: "The applicant's date of birth is missing"
+
+action: "The applicant's age is reported as zero"
+
+occurrence: "C005_BR3"
+
+source_chunks: ["C005"]
+
+  - rule_id: "C005_BR4"
+
+rule: "When an applicant's date of birth is on record, their age is calculated as the number of full years that have elapsed between their date of birth and the current date."
+
+condition: "The applicant's date of birth is present"
+
+action: "The applicant's age is calculated as the whole number of years since their date of birth"
+
+occurrence: "C005_BR4"
+
+source_chunks: ["C005"]
+
+  - rule_id: "C005_BR5"
+
+rule: "An applicant is considered employed if their recorded employment status indicates they are either employed by an organization or self-employed, regardless of how that status was capitalized."
+
+condition: "The applicant's employment status is employed or self-employed, in any letter casing"
+
+action: "The applicant is treated as employed"
+
+occurrence: "C005_BR5"
+
+source_chunks: ["C005"]
+
+  - rule_id: "C005_BR6"
+
+rule: "An applicant whose employment status is anything other than employed or self-employed is not considered employed."
+
+condition: "The applicant's employment status is neither employed nor self-employed"
+
+action: "The applicant is not treated as employed"
+
+occurrence: "C005_BR6"
+
+source_chunks: ["C005"]
+
+  - rule_id: "C005_BR7"
+
+rule: "If an applicant record is removed from the organization's records, all of that applicant's associated loan application records are removed as well."
+
+condition: "An applicant record is deleted"
+
+action: "All loan application records belonging to that applicant are also removed"
+
+occurrence: "C005_BR7"
+
+source_chunks: ["C005"]
+---
+
+This chunk's imports provide the following capabilities. jakarta.persistence.*
+(wildcard import) provides all JPA annotations used in this class: @Entity,
+@Table, @Id, @GeneratedValue, @Column, @OneToMany, CascadeType, FetchType,
+GenerationType, and @PrePersist. lombok.Getter and lombok.Setter provide
+automatically generated getter and setter methods for every field.
+lombok.NoArgsConstructor provides an automatically generated no-argument
+constructor required by JPA. java.time.LocalDate provides the type used for
+the date-of-birth field, java.time.LocalDateTime provides the type used for
+the registration timestamp, and java.util.ArrayList and java.util.List provide
+the collection implementation and interface used for the field holding this
+applicant's loan applications.
+
+At the class level, the class is annotated with @Entity, marking it as a JPA-
+managed persistent entity. It is annotated with @Table(name = "applicant"),
+specifying that instances map to rows in a table named applicant. It is
+annotated with @Getter and @Setter (Lombok), generating getter and setter
+methods for every field. It is annotated with @NoArgsConstructor (Lombok),
+generating a public no-argument constructor required by JPA.
+
+The fields are described below in declaration order.
+
+The field id is of type Long, annotated with @Id (marking it as the primary
+key), @GeneratedValue(strategy = GenerationType.IDENTITY) (indicating the
+database auto-generates this value on insert), and @Column(name = "id")
+(mapping to a column named id). This field represents the unique identifier
+assigned to each applicant record.
+
+The field fullName is of type String, annotated with @Column(name =
+"full_name", nullable = false, length = 150). This maps to a column named
+full_name that cannot be null, with a maximum length of 150 characters. This
+field represents the applicant's full legal name.
+
+The field nationalIdNumber is of type String, annotated with @Column(name =
+"national_id_number", nullable = false, unique = true, length = 30). This maps
+to a column named national_id_number that cannot be null, must be unique
+across all rows in the table, and has a maximum length of 30 characters. This
+field represents the applicant's government-issued national identification
+number, used by the credit bureau lookup described in the second chunk (via
+getNationalIdNumber()).
+
+The field dateOfBirth is of type LocalDate, annotated with @Column(name =
+"date_of_birth", nullable = false). This maps to a column named date_of_birth
+that cannot be null. This field represents the applicant's date of birth, used
+by the calculateAge method described below.
+
+The field email is of type String, annotated with @Column(name = "email",
+length = 150). This maps to a column named email with a maximum length of 150
+characters, nullable by default. This field represents the applicant's contact
+email address.
+
+The field annualIncome is of type java.math.BigDecimal (referenced here using
+its fully qualified name rather than a separate import), annotated with
+@Column(name = "annual_income", precision = 15, scale = 2). This maps to a
+column named annual_income with a numeric precision of 15 total digits and 2
+digits after the decimal point, nullable by default. This field represents the
+applicant's stated annual income.
+
+The field employmentStatus is of type String, annotated with @Column(name =
+"employment_status", length = 30). This maps to a column named
+employment_status with a maximum length of 30 characters, nullable by default.
+This field represents the applicant's current employment classification (e.g.,
+"EMPLOYED", "SELF_EMPLOYED", "UNEMPLOYED"), used by the isEmployed method
+described below.
+
+The field registeredAt is of type LocalDateTime, annotated with @Column(name =
+"registered_at", nullable = false). This maps to a column named registered_at
+that cannot be null. This field represents the date and time the applicant was
+first registered in the system.
+
+The field loanApplications is of type List<LoanApplication>, initialized to
+new ArrayList<>() at declaration, and annotated with @OneToMany(mappedBy =
+"applicant", cascade = CascadeType.ALL, fetch = FetchType.LAZY). The
+@OneToMany annotation establishes a relationship where one Applicant can be
+associated with many LoanApplication records â in business terms, a single
+applicant may have submitted multiple loan applications over time. The
+mappedBy = "applicant" attribute indicates that the relationship is owned by
+the applicant field on the LoanApplication entity (described in the fourth
+chunk), meaning this side of the relationship does not have its own join
+column. The cascade = CascadeType.ALL setting means that any persistence
+operation performed on an Applicant (including removal) is cascaded to all of
+its associated LoanApplication records â for example, if an applicant record
+is deleted, all of their loan application records are deleted as well. The
+fetch = FetchType.LAZY setting means the list of associated loan applications
+is not loaded from the database until it is actually accessed in code. This
+field represents the complete collection of loan applications this applicant
+has submitted, initialized to an empty list by default.
+
+The class declares one JPA lifecycle hook method and two business methods.
+
+The method onCreate is declared as protected, returns void, takes no
+parameters, and is annotated with @PrePersist, meaning it is automatically
+invoked by the JPA provider immediately before a new Applicant entity is
+inserted into the database for the first time. Its single statement is an if
+statement checking whether this.registeredAt == null is true. If this
+condition is true â meaning no registration timestamp was set on the entity
+before it is persisted â the statement this.registeredAt =
+LocalDateTime.now() executes, setting the registration timestamp to the
+current date and time at the moment of creation. If the condition is false â
+meaning a registration timestamp was already explicitly set â this default-
+assignment statement is skipped, and the existing value is preserved.
+
+The method calculateAge is declared as public, returns int, and takes no
+parameters. The first statement is an if statement checking whether
+this.dateOfBirth == null is true. If this condition is true â meaning the
+applicant has no date of birth recorded â the method immediately returns the
+literal value 0, signifying that the applicant's age cannot be determined and
+is reported as zero. If the condition is false â meaning a date of birth is
+present â execution continues to the final statement, which returns the
+result of java.time.Period.between(this.dateOfBirth,
+LocalDate.now()).getYears(). Here, java.time.Period.between computes the
+period of time between this.dateOfBirth and the current date (obtained via
+LocalDate.now()), and .getYears() extracts the whole-year component of that
+period. This integer value is returned to the caller, representing the
+applicant's current age in completed years.
+
+The method isEmployed is declared as public, returns boolean, and takes no
+parameters. Its single statement returns the result of the compound expression
+"EMPLOYED".equalsIgnoreCase(this.employmentStatus) ||
+"SELF_EMPLOYED".equalsIgnoreCase(this.employmentStatus). This checks whether
+this.employmentStatus is equal, ignoring letter casing, to the literal string
+"EMPLOYED", OR whether it is equal, ignoring letter casing, to the literal
+string "SELF_EMPLOYED" (using the literals as receivers, so a null
+employmentStatus would safely evaluate both as false). If either comparison is
+true, the overall expression evaluates to true, and this value is returned,
+signifying that the applicant is considered employed. If neither comparison is
+true â meaning employmentStatus is null, or is some other value such as
+"UNEMPLOYED" or "RETIRED" â the overall expression evaluates to false, and
+this value is returned, signifying that the applicant is not considered
+employed.
+
+## Supporting Elements in This Chunk
+
+All fields declared in this class are used either directly (as mapped
+persistent columns described in the field walkthrough above) or indirectly via
+the Lombok-generated getters and setters (used by other chunks, such as the
+credit score lookup in the second chunk which calls getNationalIdNumber(), and
+the entity association set via setApplicant(applicant) in the second chunk).
+The onCreate lifecycle hook, calculateAge, and isEmployed methods are all
+fully narrated above and are not part of a single connected primary flow with
+each other, but each is a complete, independently-reachable unit of behavior
+on this entity; no field, constant, or method remains unreached. This section
+is included to confirm no additional unreached elements exist beyond what has
+been described.

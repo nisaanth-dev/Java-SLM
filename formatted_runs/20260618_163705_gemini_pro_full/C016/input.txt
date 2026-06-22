@@ -1,0 +1,57 @@
+CHUNK_ID: C016
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f16 (com.acme.insurance.claims.service.impl.DocumentValidationServiceImpl)
+
+LAYER: Service
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.acme.insurance.claims.service.impl;
+
+import com.acme.insurance.claims.entity.ClaimDocumentEntity;
+import com.acme.insurance.claims.exception.ClaimSystemException;
+import com.acme.insurance.claims.service.DocumentValidationService;
+import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.util.List;
+
+/**
+ * Executes business rules on uploaded documents before they are permanently linked to a claim.
+ */
+@Service
+public class DocumentValidationServiceImpl implements DocumentValidationService {
+
+    private static final Logger log = LoggerFactory.getLogger(DocumentValidationServiceImpl.class);
+    private static final long MAX_FILE_SIZE_BYTES = 10485760L; // 10 MB
+
+    @Override
+    public void validateDocuments(List<ClaimDocumentEntity> documents) {
+        log.debug("Initiating document validation sweep");
+
+        if (documents == null || documents.isEmpty()) {
+            log.debug("No documents provided for validation");
+            return;
+        }
+
+        for (ClaimDocumentEntity doc : documents) {
+            if (doc.getFileSizeBytes() > MAX_FILE_SIZE_BYTES) {
+                log.error("Document {} exceeds maximum size limit", doc.getFileName());
+                throw new ClaimSystemException("E_DOC_001", "Document exceeds 10MB limit: " + doc.getFileName());
+            }
+
+            if (doc.getFileName() == null || !doc.getFileName().toLowerCase().endsWith(".pdf")) {
+                log.error("Document {} has invalid file type", doc.getFileName());
+                throw new ClaimSystemException("E_DOC_002", "Only PDF documents are allowed: " + doc.getFileName());
+            }
+        }
+
+        log.info("Successfully validated {} documents", documents.size());
+    }
+}

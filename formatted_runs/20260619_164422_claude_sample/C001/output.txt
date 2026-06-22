@@ -1,0 +1,381 @@
+business_functional_name: |
+Loan Application Submission And Status Management
+
+core_business_functionality: |
+This component exposes the primary touchpoints through which external clients
+submit new loan applications, retrieve application details, and manage
+application status transitions throughout the loan lifecycle. It acts as the
+authoritative gateway for all inbound loan origination activity, enforcing
+that only well-formed requests progress into the organisation's processing
+pipeline.
+
+business_function: |
+A new loan application is accepted from an external client and forwarded into
+the processing pipeline, returning a unique reference upon successful
+creation.
+A previously submitted loan application is retrieved in full by its assigned
+reference number, enabling downstream consumers to inspect all recorded
+details.
+All loan applications associated with a specific applicant are retrieved as a
+collection, or a no-content signal is issued when none exist.
+The recorded status of an existing loan application is advanced to a new
+value, along with optional remarks, finalising that stage of the underwriting
+workflow.
+The current status of a loan application is retrieved in isolation, supporting
+lightweight polling by front-end or downstream systems without fetching full
+application data.
+
+business_functions_list: 
+  - Submit Application
+  - Retrieve Application
+  - List Applicant Applications
+  - Advance Application Status
+  - Poll Application Status
+  - Reject Invalid Submission
+
+business_rules: 
+  - rule_id: "C001_BR1"
+
+rule: "A loan application submission must include all mandatory applicant details; any submission that fails to meet the required data standards is refused and the applicant is notified of the specific deficiency."
+
+condition: "A loan application request arrives with missing or malformed mandatory fields."
+
+action: "The submission is rejected and a validation failure is communicated to the submitting party."
+
+occurrence: "C001_BR1"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR2"
+
+rule: "A loan application status inquiry or retrieval request referencing a non-existent application reference must result in a clear not-found response, preventing ambiguous outcomes for the requesting party."
+
+condition: "The requested application reference does not correspond to any recorded application."
+
+action: "The request is refused with a not-found notification returned to the caller."
+
+occurrence: "C001_BR2"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR3"
+
+rule: "A status update request must be refused if the proposed new status violates the permitted transition rules governing the loan lifecycle, ensuring that no application can be moved to an invalid stage."
+
+condition: "The requested status transition is not permitted for the application's current standing."
+
+action: "The status update is rejected and the reason is communicated to the requesting party."
+
+occurrence: "C001_BR3"
+
+source_chunks: ["C001"]
+
+  - rule_id: "C001_BR4"
+
+rule: "When no loan applications exist on record for a given applicant, the system must communicate absence explicitly rather than returning an empty list, so that callers can distinguish between 'no results' and a processing error."
+
+condition: "A request for all applications belonging to an applicant yields no matching records."
+
+action: "A no-content response is returned to the caller."
+
+occurrence: "C001_BR4"
+
+source_chunks: ["C001"]
+
+---
+
+**Technical Narrative**
+
+**Imports and Class-Level Structure**
+
+The source file begins with its package declaration placing this class in the
+`com.meridian.loanorigination.controller` package, establishing it
+unambiguously as the controller layer of the Meridian Loan Origination
+Platform.
+
+The import block brings in six in-application classes.
+`LoanApplicationRequestDTO` is imported from the
+`com.meridian.loanorigination.dto` package (the DTO layer) and supplies the
+structured request body for new loan submissions.
+`LoanApplicationResponseDTO`, also from the DTO layer, is the full response
+representation returned to callers after successful retrieval or creation.
+`LoanStatusResponseDTO`, likewise from the DTO layer, is the lightweight
+response object carrying only status information.
+`LoanApplicationNotFoundException` is imported from
+`com.meridian.loanorigination.exception` (the exception layer) and represents
+the business condition where an application reference does not exist.
+`LoanValidationException`, also from the exception layer, represents the
+condition where submitted data violates validation rules.
+`LoanApplicationService` is imported from the
+`com.meridian.loanorigination.service` package (the service layer) and is the
+sole downstream dependency through which all business operations are
+delegated.
+
+From the Lombok library, `RequiredArgsConstructor` is imported to generate a
+constructor accepting all `final` fields, which drives constructor-based
+dependency injection. `Slf4j` is imported to provide a logger instance for
+structured audit logging throughout this class. From the Spring framework,
+`HttpStatus` provides the HTTP status code constants used in building response
+entities; `ResponseEntity` wraps responses with explicit HTTP status codes;
+`Validated` enables method-level constraint validation; `RestController` marks
+this class as a REST controller producing JSON responses; `RequestMapping`
+establishes the base URL path; `PostMapping`, `GetMapping`, and `PutMapping`
+bind individual methods to specific HTTP verbs and sub-paths; `PathVariable`
+and `RequestParam` bind URL path segments and query parameters respectively;
+and `RequestBody` binds the JSON request body to a method parameter. From the
+Bean Validation API, `Valid` triggers deep validation of the annotated DTO,
+and `NotBlank` enforces that path and query parameters are not null or blank.
+`java.util.List` provides the typed collection for returning multiple
+applications.
+
+The class `LoanApplicationController` carries four class-level annotations.
+`@RestController` registers this class with the Spring MVC dispatch layer and
+configures all handler methods to serialise their return values directly into
+the HTTP response body as JSON. `@RequestMapping("/api/v1/loans")` sets the
+base path prefix applied to every handler method's own path, meaning all
+endpoints in this class are reachable under `/api/v1/loans`.
+`@RequiredArgsConstructor` generates a single constructor at compile time,
+accepting the single `final` field `loanApplicationService` of type
+`LoanApplicationService`; Spring uses this generated constructor to inject the
+service layer dependency at application startup. `@Slf4j` generates a static
+`Logger` field named `log` for this class. `@Validated` activates constraint
+validation for `@NotBlank` and similar annotations on method parameters
+directly in this class.
+
+The single class-level field is `loanApplicationService`, declared `private
+final` and of type `LoanApplicationService`. Its `final` qualifier makes it
+eligible for injection through the Lombok-generated constructor. Its business
+role is to serve as the exclusive gateway through which this controller
+delegates all loan application operations â submission, retrieval, status
+updates, and status polling â to the service layer.
+
+---
+
+**Primary Flow: `submitLoanApplication`**
+
+The primary entry point is the method `submitLoanApplication`, declared
+`public` with return type `ResponseEntity<LoanApplicationResponseDTO>`. It
+accepts a single parameter: `requestDTO` of type `LoanApplicationRequestDTO`,
+annotated `@Valid` to trigger Bean Validation on the DTO's fields before the
+method body executes. The method is annotated `@PostMapping("/applications")`,
+which binds it to HTTP POST requests at the path `/api/v1/loans/applications`.
+
+Execution begins with an info-level log statement via the established `log`
+logger. The log records the message `"Received loan application submission
+request for applicant: {}"` with the value of
+`requestDTO.getApplicantNationalId()` substituted as the log argument. This
+log serves as an audit trail entry confirming inbound receipt of a submission
+request, identifying the applicant by their national identifier.
+
+A `try` block wraps the remainder of the method body. Within it, a local
+variable `responseDTO` of type `LoanApplicationResponseDTO` is declared and
+populated by the return value of a call to
+`loanApplicationService.submitApplication(requestDTO)`. The argument passed is
+the full `requestDTO` object received from the caller. Control transfers out
+to the service layer's `submitApplication` operation; its result â a fully
+populated `LoanApplicationResponseDTO` â returns to this point and is
+assigned to `responseDTO`. The internal logic of `submitApplication` belongs
+to its own chunk's narrative and is not narrated here.
+
+After the successful return, a second info-level log statement records `"Loan
+application successfully created with reference: {}"` with
+`responseDTO.getApplicationReference()` as the argument, capturing the
+assigned application reference in the audit log.
+
+The method then constructs and returns a `ResponseEntity` built using
+`ResponseEntity.status(HttpStatus.CREATED).body(responseDTO)`. The HTTP status
+code is `201 CREATED`, signalling to the caller that a new resource was
+created. The body of the response is the `responseDTO` object. This return
+terminates successful execution of the method and delivers the created
+application's full details to the caller.
+
+The single `catch` block intercepts `LoanValidationException`. When this
+exception is raised â indicating that the submitted loan application data
+failed one or more validation rules within the service layer â the catch
+block logs a warning via `log.warn` with the message `"Loan application
+submission failed due to validation error: {}"` and the exception's message as
+the argument, preserving a record of what was rejected. The catch block then
+re-throws the intercepted `LoanValidationException` via `throw ex`. Re-
+throwing propagates the exception to the framework's exception handling
+infrastructure (expected to be a `@ControllerAdvice` handler defined elsewhere
+in the application) to produce the appropriate error response. No `finally`
+block is present; no cleanup resource is managed in this method.
+
+---
+
+**Supporting Elements in This Chunk**
+
+**`getLoanApplicationByReference`**
+
+The method `getLoanApplicationByReference` is declared `public` with return
+type `ResponseEntity<LoanApplicationResponseDTO>`. It accepts a single
+parameter `applicationReference` of type `String`, annotated `@PathVariable`
+to bind it to the `{applicationReference}` segment of the URL path and
+`@NotBlank` to enforce that the value is not null or empty before the method
+body executes. The method is annotated
+`@GetMapping("/applications/{applicationReference}")`, binding it to HTTP GET
+requests at `/api/v1/loans/applications/{applicationReference}`.
+
+Execution begins with an info-level log recording `"Fetching loan application
+for reference: {}"` with `applicationReference` as the argument.
+
+A `try` block wraps the operation. A local variable `responseDTO` of type
+`LoanApplicationResponseDTO` is declared and assigned the return value of
+`loanApplicationService.getApplicationByReference(applicationReference)`. The
+argument passed is the `applicationReference` path variable. Control transfers
+to the service layer; its result returns here and is assigned to
+`responseDTO`.
+
+The method returns `ResponseEntity.ok(responseDTO)`, producing an HTTP `200
+OK` response with the full application data as the body. This terminates
+successful execution.
+
+The `catch` block intercepts `LoanApplicationNotFoundException`. When raised
+â meaning no application exists for the given reference â the block logs a
+warning with the message `"Loan application not found for reference: {}"` and
+`applicationReference` as the argument, then re-throws the exception via
+`throw ex` for handling by the framework's global exception handler. No
+`finally` block is present.
+
+**`getApplicationsByApplicant`**
+
+The method `getApplicationsByApplicant` is declared `public` with return type
+`ResponseEntity<List<LoanApplicationResponseDTO>>`. It accepts one parameter:
+`nationalId` of type `String`, annotated `@PathVariable` and `@NotBlank`. The
+method is annotated `@GetMapping("/applications/applicant/{nationalId}")`,
+binding it to HTTP GET requests at
+`/api/v1/loans/applications/applicant/{nationalId}`.
+
+Execution begins with an info-level log recording `"Fetching all loan
+applications for applicant national ID: {}"` with `nationalId` as the
+argument.
+
+A local variable `applications` of type `List<LoanApplicationResponseDTO>` is
+declared and populated by the return value of
+`loanApplicationService.getApplicationsByApplicantId(nationalId)`. The
+argument passed is the `nationalId` path variable. Control transfers to the
+service layer; the returned list is assigned to `applications`.
+
+An `if` statement then checks whether `applications.isEmpty()` is `true` â
+meaning the returned list contains no elements. If this condition is true, an
+info-level log records `"No loan applications found for applicant national ID:
+{}"` with `nationalId`, and the method returns
+`ResponseEntity.noContent().build()`, producing an HTTP `204 No Content`
+response. This return terminates the method. If `applications.isEmpty()` is
+`false` â meaning at least one application was found â the `if` branch is
+not entered, and the method returns `ResponseEntity.ok(applications)`,
+producing an HTTP `200 OK` response with the full list as the body. No
+`try/catch` block surrounds this method; no exception handling is implemented
+here, meaning any uncaught exceptions from the service layer propagate to the
+framework's global handler without local interception.
+
+**`updateApplicationStatus`**
+
+The method `updateApplicationStatus` is declared `public` with return type
+`ResponseEntity<LoanStatusResponseDTO>`. It accepts three parameters:
+`applicationReference` of type `String` annotated `@PathVariable` and
+`@NotBlank`; `newStatus` of type `String` annotated `@RequestParam` and
+`@NotBlank`; and `remarks` of type `String` annotated `@RequestParam(required
+= false)`, making it optional â it may be `null` when not provided by the
+caller. The method is annotated
+`@PutMapping("/applications/{applicationReference}/status")`, binding it to
+HTTP PUT requests at
+`/api/v1/loans/applications/{applicationReference}/status`.
+
+Execution begins with an info-level log recording `"Updating status of loan
+application {} to {}"` with `applicationReference` and `newStatus` as
+arguments.
+
+A `try` block wraps the operation. A local variable `statusResponse` of type
+`LoanStatusResponseDTO` is declared and populated by the return value of
+`loanApplicationService.updateApplicationStatus(applicationReference,
+newStatus, remarks)`. The three arguments passed are the path variable
+`applicationReference`, the query parameter `newStatus`, and the optional
+`remarks` value (which may be `null`). Control transfers to the service layer;
+its result returns here and is assigned to `statusResponse`.
+
+After the successful return, an info-level log records `"Status of loan
+application {} successfully updated to {}"` with `applicationReference` and
+`newStatus`. The method then returns `ResponseEntity.ok(statusResponse)`,
+producing an HTTP `200 OK` response with the status response as the body. This
+terminates successful execution.
+
+The first `catch` block intercepts `LoanApplicationNotFoundException`. When
+raised, it logs a warning `"Cannot update status: loan application {} not
+found"` with `applicationReference`, then re-throws `ex`. The second `catch`
+block intercepts `LoanValidationException`. When raised â indicating the
+requested status transition is not permitted â it logs a warning `"Cannot
+update status of loan application {}: {}"` with `applicationReference` and
+`ex.getMessage()`, then re-throws `ex`. Both re-throws delegate to the
+framework's global exception handler. No `finally` block is present.
+
+**`getApplicationStatus`**
+
+The method `getApplicationStatus` is declared `public` with return type
+`ResponseEntity<LoanStatusResponseDTO>`. It accepts one parameter:
+`applicationReference` of type `String` annotated `@PathVariable` and
+`@NotBlank`. It is annotated
+`@GetMapping("/applications/{applicationReference}/status")`, binding it to
+HTTP GET requests at
+`/api/v1/loans/applications/{applicationReference}/status`.
+
+Execution begins with an info-level log recording `"Polling status for loan
+application reference: {}"` with `applicationReference`.
+
+A `try` block wraps the operation. A local variable `statusResponse` of type
+`LoanStatusResponseDTO` is declared and assigned the return value of
+`loanApplicationService.getApplicationStatus(applicationReference)`. Control
+transfers to the service layer; its result returns here. The method returns
+`ResponseEntity.ok(statusResponse)`, producing an HTTP `200 OK` response with
+the lightweight status payload. This terminates successful execution.
+
+The `catch` block intercepts `LoanApplicationNotFoundException`. When raised,
+it logs a warning `"Cannot retrieve status: loan application {} not found"`
+with `applicationReference`, then re-throws `ex` to the framework's global
+handler. No `finally` block is present.
+
+---
+
+**Self-Review**
+
+**Rules followed:**
+Execution-Trace Mode was applied throughout, as this is a `Controller` chunk
+with `ENTRY_POINT: yes`. The two-stage walk from Â§3.4.1 was followed:
+`submitLoanApplication` was selected as the primary flow (it is the POST
+handler and the most operationally significant entry point); all remaining
+handlers were placed under Supporting Elements. The establish-once principle
+(Â§3.4.0) was applied â the `log` logger and the `loanApplicationService`
+dependency are explained at the class level and referenced by name thereafter
+without re-explaining their general mechanism. The Lombok
+`@RequiredArgsConstructor` annotation was explained once at class level per
+Â§3.3's generated-behavior annotation rule. All imports were narrated per
+Â§3.3's import-handling rule. Every `try/catch` block was analysed in full per
+Â§3.4.3. Cross-chunk calls (`loanApplicationService.*` methods) were handled
+per Â§3.4.4 â only what is visible from the calling side is described; no
+service-layer internals are narrated. All `@PathVariable`, `@RequestParam`,
+and `@RequestBody` bindings are described. Both true and false paths of the
+`isEmpty()` branch in `getApplicationsByApplicant` are described per Â§3.4.5.
+All return statements, exception re-throws, and log statements are
+individually narrated. Verbatim naming (Â§3.6) is observed throughout. Absence
+of `finally` blocks is noted per Â§3.4.8.
+
+**Gaps or uncertainties identified:**
+The `@NotBlank` constraint on `@RequestParam` and `@PathVariable` parameters
+produces a `ConstraintViolationException` when violated; the chunk's code does
+not contain a local `catch` for this â it would propagate to the global
+handler. This propagation path is not explicitly narrated because no `catch`
+for it is visible in this chunk. This is an absence worth noting. The exact
+HTTP status codes produced by the global handler for re-thrown
+`LoanValidationException` and `LoanApplicationNotFoundException` are not
+visible from this chunk and are not speculated upon.
+
+**Duplication check:**
+The phrase "re-throws the exception via `throw ex` for handling by the
+framework's global exception handler" and its near-equivalent appear in all
+five handler methods. However, each occurrence is within a distinct method's
+own Supporting Elements entry and describes a distinct business response; they
+are not the same explanation repeated within one continuous flow. The
+description of `log` as "the established `log` logger" at first use in the
+primary flow and later simply as `log.warn` or `log.info` in Supporting
+Elements is consistent with the establish-once rule. No mechanism or phrase is
+re-explained in a way that constitutes a violation.

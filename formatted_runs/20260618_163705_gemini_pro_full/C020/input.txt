@@ -1,0 +1,49 @@
+CHUNK_ID: C020
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f20 (com.acme.insurance.claims.event.ClaimEventListener)
+
+LAYER: EventListener
+
+ENTRY_POINT: yes
+
+=== CODE ===
+
+package com.acme.insurance.claims.event;
+
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Subscribes to the enterprise event broker to maintain a read-only audit log of claim lifecycle changes.
+ */
+@Component
+public class ClaimEventListener {
+
+    private static final Logger log = LoggerFactory.getLogger(ClaimEventListener.class);
+
+    /**
+     * Consumes messages from the primary claim events topic.
+     */
+    @KafkaListener(topics = "acme.claims.ingestion.events", groupId = "audit-logging-group")
+    public void handleClaimEvent(String eventPayload) {
+        log.debug("Intercepted claim lifecycle event from broker");
+
+        if (eventPayload == null || eventPayload.trim().isEmpty()) {
+            log.warn("Received empty event payload on audit topic; skipping.");
+            return;
+        }
+
+        try {
+            log.info("AUDIT TRAIL ENTRY: {}", eventPayload);
+            // In a full implementation, this would persist the raw payload to an audit database.
+        } catch (Exception ex) {
+            log.error("Critical failure while logging audit event. Payload lost in processing.", ex);
+        }
+    }
+}

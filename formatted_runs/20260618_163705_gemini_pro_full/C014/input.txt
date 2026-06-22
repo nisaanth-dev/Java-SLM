@@ -1,0 +1,55 @@
+CHUNK_ID: C014
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f14 (com.acme.insurance.claims.entity.ClaimDocumentEntity)
+
+LAYER: Entity
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.acme.insurance.claims.entity;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.Table;
+import jakarta.persistence.Id;
+import jakarta.persistence.Column;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.FetchType;
+import java.time.LocalDateTime;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.NoArgsConstructor;
+
+/**
+ * Represents a supplementary file uploaded to support a claim.
+ */
+@Entity
+@Table(name = "CLM_DOCUMENT")
+@Getter
+@Setter
+@NoArgsConstructor
+public class ClaimDocumentEntity {
+
+    @Id
+    @Column(name = "DOCUMENT_ID", nullable = false, updatable = false, length = 36)
+    private String documentId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "CLAIM_ID", nullable = false)
+    private ClaimRecord claimRecord;
+
+    @Column(name = "FILE_NAME", nullable = false, length = 255)
+    private String fileName;
+
+    @Column(name = "FILE_SIZE_BYTES", nullable = false)
+    private Long fileSizeBytes;
+
+    @Column(name = "UPLOADED_AT", nullable = false, updatable = false)
+    private LocalDateTime uploadedAt;
+}

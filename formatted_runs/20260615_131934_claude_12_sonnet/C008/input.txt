@@ -1,0 +1,50 @@
+CHUNK_ID: C008
+
+APPLICATION: Meridian Loan Origination Platform
+
+SERVICE: loan-origination-service
+
+FILE: f07 (com.meridianbank.loanorigination.mapper.LoanApplicationMapper)
+
+LAYER: Mapper
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.meridianbank.loanorigination.mapper;
+
+import com.meridianbank.loanorigination.dto.LoanApplicationResponse;
+import com.meridianbank.loanorigination.entity.Applicant;
+import com.meridianbank.loanorigination.entity.LoanApplication;
+import org.springframework.stereotype.Component;
+
+@Component
+public class LoanApplicationMapper {
+
+    public LoanApplicationResponse toResponse(LoanApplication loanApplication) {
+        LoanApplicationResponse response = new LoanApplicationResponse();
+
+        response.setId(loanApplication.getId());
+        response.setRequestedAmount(loanApplication.getRequestedAmount());
+        response.setApprovedAmount(loanApplication.getApprovedAmount());
+        response.setLoanPurpose(loanApplication.getLoanPurpose());
+        response.setTermInMonths(loanApplication.getTermInMonths());
+        response.setStatus(loanApplication.getStatus());
+        response.setRejectionReason(loanApplication.getRejectionReason());
+        response.setCreditScoreAtSubmission(loanApplication.getCreditScoreAtSubmission());
+        response.setSubmittedAt(loanApplication.getSubmittedAt());
+        response.setDecisionedAt(loanApplication.getDecisionedAt());
+
+        Applicant applicant = loanApplication.getApplicant();
+        if (applicant != null) {
+            response.setApplicantId(applicant.getId());
+            response.setApplicantFullName(applicant.getFullName());
+        } else {
+            response.setApplicantId(null);
+            response.setApplicantFullName("UNKNOWN");
+        }
+
+        return response;
+    }
+}

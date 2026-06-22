@@ -1,0 +1,308 @@
+business_functional_name: |
+Loan Application Submission Request Capture
+
+core_business_functionality: |
+This component defines and enforces the structure of the information a
+borrower or originating officer must supply when submitting a new loan
+application, including all field-level constraints that enforce business
+eligibility rules at the point of entry. It ensures that only well-formed,
+policy-compliant application data reaches internal processing.
+
+business_function: |
+Capture the unique identifier of the borrower submitting the application.
+Enforce that the borrower identifier follows the institution's standard
+applicant reference format.
+Capture the monetary amount the borrower wishes to borrow.
+Enforce that the requested loan amount falls within the institution's
+permitted lending range.
+Capture the number of months over which the borrower wishes to repay.
+Enforce that the requested repayment duration falls within the institution's
+approved tenure boundaries.
+Capture the category of loan product being applied for.
+Capture the borrower's stated reason for seeking the loan.
+Limit the length of the stated loan purpose to prevent overly long
+submissions.
+Capture the originating branch code where the application is being processed.
+Enforce that the branch code conforms to the permitted length range.
+Capture the identifier of the relationship manager sponsoring the application.
+Enforce that the relationship manager identifier follows the institution's
+standard RM reference format.
+Capture the borrower's declaration that they have no existing loan default.
+Capture the borrower's self-reported gross monthly income.
+Enforce that declared monthly income is within the permissible reporting
+range.
+Capture the borrower's self-reported total monthly debt obligations.
+Enforce that declared monthly obligations are within the permissible reporting
+range.
+
+business_functions_list: 
+  - Capture Borrower Identity
+  - Validate Applicant Reference
+  - Record Requested Amount
+  - Enforce Lending Limits
+  - Record Repayment Tenure
+  - Enforce Tenure Boundaries
+  - Classify Loan Product
+  - Capture Loan Purpose
+  - Limit Purpose Length
+  - Identify Originating Branch
+  - Validate Branch Code
+  - Identify Relationship Manager
+  - Validate Manager Reference
+  - Record Default Declaration
+  - Capture Declared Income
+  - Validate Income Range
+  - Capture Monthly Obligations
+  - Validate Obligations Range
+
+business_rules: 
+  - rule_id: "C002_BR1"
+
+rule: "A borrower identifier submitted with a loan application must not be blank and must conform to the pattern APL- followed by exactly eight digits; any other format is rejected."
+
+condition: "A loan application submission is received containing an applicant identifier field."
+
+action: "The system rejects the submission with the message 'Applicant ID must not be blank' if the field is empty, or 'Applicant ID must match pattern APL-XXXXXXXX' if the format does not match."
+
+occurrence: "C002_BR1"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR2"
+
+rule: "The loan amount requested must be present, must be a positive figure, and must fall between 10,000 and 5,000,000 inclusive; amounts outside this range or with more than two decimal places are not accepted."
+
+condition: "A loan application submission is received containing a requested loan amount."
+
+action: "The system rejects the submission with a descriptive message identifying which specific constraint was violated."
+
+occurrence: "C002_BR2"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR3"
+
+rule: "The requested repayment period must be present and must be between 6 months and 360 months inclusive; any tenure outside this range is not accepted."
+
+condition: "A loan application submission is received containing a tenure value."
+
+action: "The system rejects the submission with the message 'Minimum tenure is 6 months' or 'Maximum tenure is 360 months' as appropriate."
+
+occurrence: "C002_BR3"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR4"
+
+rule: "The loan product type must always be specified; an application without a loan type classification cannot be accepted."
+
+condition: "A loan application submission is received."
+
+action: "The system rejects the submission with the message 'Loan type is required' if the product type is absent."
+
+occurrence: "C002_BR4"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR5"
+
+rule: "The originating branch code must be present and must be between 4 and 10 characters in length."
+
+condition: "A loan application submission is received containing a branch code."
+
+action: "The system rejects the submission if the branch code is blank or outside the permitted length range."
+
+occurrence: "C002_BR5"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR6"
+
+rule: "The relationship manager identifier must be present and must conform to the pattern RM- followed by exactly six digits; any other format is rejected."
+
+condition: "A loan application submission is received containing a relationship manager identifier."
+
+action: "The system rejects the submission with the message 'Relationship manager ID must match pattern RM-XXXXXX' if the format does not match."
+
+occurrence: "C002_BR6"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR7"
+
+rule: "A borrower must affirmatively declare that they have no existing loan default before an application can be submitted; the declaration field may not be left absent."
+
+condition: "A loan application submission is received."
+
+action: "The system rejects the submission with the message 'Self-declaration of no existing default is required' if the declaration is absent."
+
+occurrence: "C002_BR7"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR8"
+
+rule: "Declared monthly income, if provided, must be zero or greater and must not exceed 99,999,999.9999; values with more than 8 integer digits or more than 4 decimal places are not accepted."
+
+condition: "A loan application submission is received containing a declared monthly income figure."
+
+action: "The system rejects the submission with the applicable constraint violation message."
+
+occurrence: "C002_BR8"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR9"
+
+rule: "Declared monthly obligations, if provided, must be zero or greater and must not exceed 99,999,999.9999; values with more than 8 integer digits or more than 4 decimal places are not accepted."
+
+condition: "A loan application submission is received containing declared monthly obligations."
+
+action: "The system rejects the submission with the applicable constraint violation message."
+
+occurrence: "C002_BR9"
+
+source_chunks: ["C002"]
+
+---
+
+**Technical Narrative**
+
+**Imports and Framework Dependencies**
+
+This file opens at the top of the source for class `LoanApplicationRequestDTO`
+in the `com.credex.loanorigination.dto` package. The in-application import
+`com.credex.loanorigination.entity.LoanType` brings in the `LoanType` enum
+from the entity layer, used as the type of the `loanType` field to classify
+the loan product being requested. The imports from
+`jakarta.validation.constraints` provide Bean Validation annotations:
+`@DecimalMax` constrains the maximum value of a decimal field; `@DecimalMin`
+constrains the minimum value with an optional inclusivity flag; `@Digits`
+constrains the maximum number of integer and fractional digits; `@Max`
+constrains the maximum value of an integer field; `@Min` constrains the
+minimum value of an integer field; `@NotBlank` requires a string field to be
+non-null and contain at least one non-whitespace character; `@NotNull`
+requires any field to be non-null; `@Pattern` requires a string to match a
+specified regular expression; `@Positive` requires a numeric value to be
+strictly greater than zero; and `@Size` constrains the minimum and/or maximum
+length of a string. Lombok's `@Data` generates getters, setters, `equals`,
+`hashCode`, and `toString` for all fields. `@Builder` generates a static
+builder pattern for constructing instances. `@NoArgsConstructor` generates a
+public no-argument constructor (required when `@AllArgsConstructor` is also
+present, to ensure the no-arg form exists). `@AllArgsConstructor` generates a
+public constructor accepting all declared fields as parameters in declaration
+order. `java.math.BigDecimal` is the precise decimal type used for all
+monetary and ratio fields.
+
+**Class-Level Declaration**
+
+The class `LoanApplicationRequestDTO` carries four Lombok annotations: `@Data`
+(as established above), `@Builder`, `@NoArgsConstructor`, and
+`@AllArgsConstructor`. Together, these cause Lombok to generate: a no-argument
+constructor; an all-argument constructor accepting `applicantId`,
+`requestedAmount`, `tenureMonths`, `loanType`, `purpose`, `branchCode`,
+`relationshipManagerId`, `selfDeclaredNoDefault`, `declaredMonthlyIncome`, and
+`declaredMonthlyObligations` in that declaration order; getters and setters
+for all ten fields; and `equals`, `hashCode`, and `toString` implementations.
+No explicit methods are written in this class.
+
+**Field Declarations â in Declaration Order**
+
+The field `applicantId` is of type `String`. `@NotBlank(message = "Applicant
+ID must not be blank")` requires the value to be non-null and to contain at
+least one non-whitespace character; if violated, the error message `"Applicant
+ID must not be blank"` is produced. `@Pattern(regexp = "^APL-[0-9]{8}$",
+message = "Applicant ID must match pattern APL-XXXXXXXX")` requires the value
+to match the regular expression `^APL-[0-9]{8}$` â meaning the string must
+begin with the literal prefix `"APL-"` followed by exactly eight decimal
+digits and nothing else; if violated, the message `"Applicant ID must match
+pattern APL-XXXXXXXX"` is produced. This field carries the unique applicant
+reference code identifying the individual borrower.
+
+The field `requestedAmount` is of type `BigDecimal`. `@NotNull(message =
+"Requested amount is required")` requires the value to be present.
+`@Positive(message = "Requested amount must be a positive value")` requires
+the value to be strictly greater than zero. `@DecimalMin(value = "10000.00",
+message = "Minimum loan amount is 10,000")` enforces that the value must be at
+least `10000.00`, with the message `"Minimum loan amount is 10,000"` on
+violation; the `inclusive` attribute defaults to `true`, meaning `10000.00`
+itself is permitted. `@DecimalMax(value = "5000000.00", message = "Maximum
+loan amount is 5,000,000")` enforces that the value must not exceed
+`5000000.00`, with the message `"Maximum loan amount is 5,000,000"` on
+violation. `@Digits(integer = 13, fraction = 2, message = "Requested amount
+must have at most 13 integer digits and 2 decimal places")` enforces that the
+value has at most 13 digits before the decimal point and at most 2 digits
+after. This field holds the monetary amount the borrower is requesting.
+
+The field `tenureMonths` is of type `Integer`. `@NotNull(message = "Tenure is
+required")` requires the field to be non-null. `@Min(value = 6, message =
+"Minimum tenure is 6 months")` requires the integer value to be at least `6`;
+if violated, the message `"Minimum tenure is 6 months"` is produced.
+`@Max(value = 360, message = "Maximum tenure is 360 months")` requires the
+value to be at most `360`; if violated, the message `"Maximum tenure is 360
+months"` is produced. This field holds the borrower's requested repayment
+period in months, constrained between a minimum of 6 months and a maximum of
+360 months (30 years).
+
+The field `loanType` is of type `LoanType`. `@NotNull(message = "Loan type is
+required")` requires the field to be non-null. If absent, the validation
+message `"Loan type is required"` is produced. This field classifies the loan
+product category being applied for.
+
+The field `purpose` is of type `String` with no not-null constraint, making it
+optional. `@Size(max = 500, message = "Purpose must not exceed 500
+characters")` enforces that, if a value is provided, it must not exceed 500
+characters; the message `"Purpose must not exceed 500 characters"` is produced
+on violation. This field holds the borrower's freely stated reason for the
+loan.
+
+The field `branchCode` is of type `String`. `@NotBlank(message = "Branch code
+is required")` requires the value to be non-null and non-blank. `@Size(min =
+4, max = 10, message = "Branch code must be between 4 and 10 characters")`
+requires the value to be between 4 and 10 characters in length inclusive; if
+violated, the message `"Branch code must be between 4 and 10 characters"` is
+produced. This field identifies the branch through which the application is
+being originated.
+
+The field `relationshipManagerId` is of type `String`. `@NotBlank(message =
+"Relationship manager ID is required")` requires a non-null, non-blank value.
+`@Pattern(regexp = "^RM-[0-9]{6}$", message = "Relationship manager ID must
+match pattern RM-XXXXXX")` requires the value to match `^RM-[0-9]{6}$` â the
+literal prefix `"RM-"` followed by exactly six decimal digits; the message
+`"Relationship manager ID must match pattern RM-XXXXXX"` is produced on
+violation. This field identifies the relationship manager responsible for the
+application.
+
+The field `selfDeclaredNoDefault` is of type `Boolean`. `@NotNull(message =
+"Self-declaration of no existing default is required")` requires the value to
+be explicitly provided (true or false); a null value triggers the message
+`"Self-declaration of no existing default is required"`. This field captures
+the borrower's formal declaration that they are not in default on any existing
+loan.
+
+The field `declaredMonthlyIncome` is of type `BigDecimal` with no not-null
+constraint, making it optional. `@DecimalMin(value = "0.0000", inclusive =
+true, message = "Declared monthly income must be zero or greater")` enforces
+that, if provided, the value must be at least `0.0000`; the `inclusive = true`
+attribute means zero is a valid value. `@DecimalMax(value = "99999999.9999",
+message = "Declared monthly income exceeds permissible limit")` enforces that
+the value must not exceed `99999999.9999`. `@Digits(integer = 8, fraction = 4,
+message = "Declared monthly income must have at most 8 integer digits and 4
+decimal places")` enforces the digit-length constraint. This field holds the
+borrower's self-reported gross monthly income.
+
+The field `declaredMonthlyObligations` is of type `BigDecimal` with no not-
+null constraint, making it optional. `@DecimalMin(value = "0.0000", inclusive
+= true, message = "Declared monthly obligations must be zero or greater")`
+enforces a floor of `0.0000` inclusive. `@DecimalMax(value = "99999999.9999",
+message = "Declared monthly obligations exceed permissible limit")` enforces a
+ceiling of `99999999.9999`. `@Digits(integer = 8, fraction = 4, message =
+"Declared monthly obligations must have at most 8 integer digits and 4 decimal
+places")` enforces the digit constraint. This field holds the borrower's self-
+reported total monthly financial obligations.
+
+No methods beyond Lombok-generated accessors, builder, and object utility
+methods are explicitly written in this class. The class contains no
+constructor logic, no branching, no loops, no exception handling, and no
+external calls. All validation enforcement is delegated to the Bean Validation
+framework at the point where this DTO is bound from an incoming request.

@@ -1,0 +1,136 @@
+business_functional_name: |
+Claim Submission Data Structure
+
+core_business_functionality: |
+Defines the required data format and validation constraints for incoming claim
+submissions. Evaluates basic triage conditions such as urgency thresholds and
+documentation presence.
+
+business_function: 
+  - Specifies the mandatory fields for a new claim.
+  - Enforces field length and value constraints on incoming data.
+  - Evaluates whether a claim requires urgent review based on amount or flags.
+  - Verifies the presence of supporting documents.
+  - Standardizes the format of incident descriptions.
+
+business_functions_list: 
+  - Specify Data
+  - Enforce Constraints
+  - Evaluate Urgency
+  - Verify Documents
+  - Standardize Description
+
+business_rules: 
+  - rule_id: "C002_BR1"
+
+rule: "A policy number must be provided and must be between eight and fifteen characters in length."
+
+condition: "Claim submission includes a policy number"
+
+action: "Enforce presence and length constraint"
+
+occurrence: "C002_BR1"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR2"
+
+rule: "An incident date must be supplied and cannot represent a date in the future."
+
+condition: "Claim submission includes an incident date"
+
+action: "Enforce presence and past-or-present constraint"
+
+occurrence: "C002_BR2"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR3"
+
+rule: "The requested claim amount must be strictly greater than zero."
+
+condition: "Claim submission includes an amount"
+
+action: "Enforce positive monetary value"
+
+occurrence: "C002_BR3"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR4"
+
+rule: "If a claim is explicitly marked as expedited, or if the requested amount exceeds fifty thousand, the claim is classified as requiring urgent review."
+
+condition: "Expedited flag is true or claim amount is greater than 50,000.00"
+
+action: "Classify as urgent"
+
+occurrence: "C002_BR4"
+
+source_chunks: ["C002"]
+
+  - rule_id: "C002_BR5"
+
+rule: "If incident description text is provided, consecutive spaces must be collapsed and outer whitespace removed."
+
+condition: "Incident description is provided"
+
+action: "Standardize text formatting"
+
+occurrence: "C002_BR5"
+
+source_chunks: ["C002"]
+
+Imports
+This chunk imports `DecimalMin`, `NotBlank`, `NotNull`, `PastOrPresent`, and
+`Size` from the `jakarta.validation.constraints` package, which provide the
+capabilities to enforce validation rules on fields. It imports standard Java
+types `BigDecimal`, `LocalDate`, and `List`. It imports Jackson serialization
+annotations `@JsonFormat` and `@JsonProperty` which map the Java fields to
+external JSON structures. It imports Lombok annotations `@Data`,
+`@NoArgsConstructor`, and `@AllArgsConstructor` which generate class
+boilerplate behavior.
+
+Class-Level Declarations
+The `ClaimSubmissionRequest` class is annotated with `@Data`, which generates
+getter and setter methods for all fields, as well as `toString`, `equals`, and
+`hashCode` methods. It is annotated with `@NoArgsConstructor`, which generates
+a default constructor with no arguments, and `@AllArgsConstructor`, which
+generates a constructor accepting arguments for every declared field in the
+order they appear.
+
+Fields
+The class declares the following fields:
+
+  - `policyNumber`: A `String` representing the associated insurance policy number. It is annotated with `@NotBlank(message = "Policy number is mandatory")` to enforce that it cannot be null or empty whitespace. It is annotated with `@Size(min = 8, max = 15, message = "Policy number must be between 8 and 15 characters")` to enforce its length boundaries. It is annotated with `@JsonProperty("policy_number")` to map this field to the external JSON key "policy_number".
+
+  - `reporterId`: A `String` representing the identifier of the person reporting the incident. It is annotated with `@NotBlank(message = "Reporter identifier is required")` and `@JsonProperty("reporter_id")`.
+
+  - `incidentDate`: A `LocalDate` representing the date the incident occurred. It is annotated with `@NotNull(message = "Incident date must be provided")`. It is annotated with `@PastOrPresent(message = "Incident date cannot be in the future")` to prevent future-dated claims. It is annotated with `@JsonFormat(pattern = "yyyy-MM-dd")` to define the expected string format during parsing, and `@JsonProperty("incident_date")`.
+
+  - `claimAmount`: A `BigDecimal` representing the monetary value requested. It is annotated with `@NotNull(message = "Claim amount is required")`. It is annotated with `@DecimalMin(value = "0.01", message = "Claim amount must be greater than zero")` to enforce a strict minimum threshold. It is mapped via `@JsonProperty("claim_amount")`.
+
+  - `incidentDescription`: A `String` representing the narrative description of the incident. It is annotated with `@NotBlank(message = "Incident description cannot be blank")`. It is annotated with `@Size(max = 2000, message = "Description exceeds maximum length of 2000 characters")` to limit the text volume. It is mapped via `@JsonProperty("incident_description")`.
+
+  - `documentIds`: A `List<String>` representing identifiers for any uploaded files. It has no validation constraints but is mapped via `@JsonProperty("document_ids")`.
+
+  - `isExpedited`: A `boolean` representing a flag to fast-track the claim. It is mapped via `@JsonProperty("is_expedited")`.
+
+Methods
+The `requiresUrgentReview` method returns a `boolean`. An `if` statement
+checks the `isExpedited` field. If this condition is true, the method returns
+`true` and terminates. If false, execution continues. A second `if` statement
+checks whether `claimAmount` is not `null` and whether
+`claimAmount.compareTo(new BigDecimal("50000.00")) > 0` is true. If this
+condition is true (meaning the amount exceeds 50,000.00), the method returns
+`true` and terminates. If false, the method returns `false`.
+
+The `hasSupportingDocuments` method returns a `boolean`. It returns the
+evaluated result of checking if `documentIds` is not `null` and if
+`!documentIds.isEmpty()` is true.
+
+The `sanitizeDescription` method returns `void`. An `if` statement checks
+whether `incidentDescription` is not `null`. If this condition is true, the
+method assigns `incidentDescription` the result of calling `trim()` and then
+`replaceAll("\s+", " ")` on its current value, standardizing whitespace. If
+the condition is false, the method does nothing.

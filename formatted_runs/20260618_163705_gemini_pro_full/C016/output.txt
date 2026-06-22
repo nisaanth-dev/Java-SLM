@@ -1,0 +1,86 @@
+business_functional_name: |
+Document Safety And Compliance Validation
+
+core_business_functionality: |
+Evaluates incoming supplementary files against strict size and format policies
+to protect system storage limits and ensure downstream readability. Rejects
+non-compliant files immediately.
+
+business_function: 
+  - Iterates through a collection of submitted document records.
+  - Prevents the intake of any file that exceeds the maximum storage quota.
+  - Prevents the intake of any file that is not in a strictly readable format.
+
+business_functions_list: 
+  - Iterate Records
+  - Prevent Oversized Intake
+  - Prevent Invalid Format
+
+business_rules: 
+  - rule_id: "C016_BR1"
+
+rule: "If an uploaded document exceeds ten megabytes in size, it must be rejected to prevent storage bloat."
+
+condition: "Document size is greater than 10,485,760 bytes"
+
+action: "Throw an error and reject the document"
+
+occurrence: "C016_BR1"
+
+source_chunks: ["C016"]
+
+  - rule_id: "C016_BR2"
+
+rule: "If an uploaded document's name is absent or does not end with a PDF extension, it must be rejected to ensure standard readability."
+
+condition: "Document name is missing or does not end with .pdf"
+
+action: "Throw an error and reject the document"
+
+occurrence: "C016_BR2"
+
+source_chunks: ["C016"]
+
+Imports
+This chunk imports `ClaimDocumentEntity` from the
+`com.acme.insurance.claims.entity` layer for the data structure, and
+`ClaimSystemException` from `com.acme.insurance.claims.exception` to signal
+business rule violations. It imports `DocumentValidationService` from the
+`com.acme.insurance.claims.service` layer defining the interface. It imports
+the Spring Framework annotation `@Service` to register the class, SLF4J
+`Logger` and `LoggerFactory` for logging, and standard Java `List`.
+
+Class-Level Declarations
+The `DocumentValidationServiceImpl` class is annotated with `@Service`. It
+declares a constant `Logger` named `log`, and a `long` constant named
+`MAX_FILE_SIZE_BYTES` initialized to the literal `10485760L`, representing a
+10 megabyte limit.
+
+Primary Flow: validateDocuments
+The `validateDocuments` method returns `void` and accepts a
+`List<ClaimDocumentEntity>` named `documents`.
+
+The method logs the initiation of the sweep. An `if` statement checks whether
+`documents` is `null` or if `documents.isEmpty()` is true. If this condition
+is true, it logs that no documents were provided and executes a `return`
+statement, terminating the method. If false, execution continues.
+
+A `for` loop iterates over each `ClaimDocumentEntity` (aliased as `doc`)
+within the `documents` list. Inside the loop, an `if` statement checks whether
+the numerical value returned by `doc.getFileSizeBytes()` is strictly greater
+than `MAX_FILE_SIZE_BYTES`. If this condition is true (the file is oversized),
+it logs an error using `doc.getFileName()`, throws a new
+`ClaimSystemException` instantiated with the literal error code `"E_DOC_001"`
+and a concatenated message containing the file name, and processing
+immediately aborts. If false, execution continues.
+
+A second `if` statement evaluates a compound condition: whether
+`doc.getFileName()` is `null`, OR whether the logical NOT of
+`doc.getFileName().toLowerCase().endsWith(".pdf")` is true. If this condition
+evaluates to true (meaning the file name is missing or is not a PDF), it logs
+an error, throws a new `ClaimSystemException` instantiated with the literal
+error code `"E_DOC_002"` and a concatenated message containing the file name,
+and aborts processing. If false, the loop continues to the next document.
+
+After the loop completes, verifying all documents, the method logs a success
+message including `documents.size()` and terminates normally.

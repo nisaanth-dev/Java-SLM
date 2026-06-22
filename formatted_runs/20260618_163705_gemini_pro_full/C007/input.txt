@@ -1,0 +1,73 @@
+CHUNK_ID: C007
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f07 (com.acme.insurance.claims.mapper.ClaimEntityMapper)
+
+LAYER: Mapper
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.acme.insurance.claims.mapper;
+
+import com.acme.insurance.claims.dto.ClaimSubmissionRequest;
+import com.acme.insurance.claims.dto.ClaimResponse;
+import com.acme.insurance.claims.entity.ClaimRecord;
+import org.springframework.stereotype.Component;
+import java.util.stream.Collectors;
+import java.util.ArrayList;
+
+/**
+ * Responsible for translating between external DTO boundaries and internal JPA entities.
+ */
+@Component
+public class ClaimEntityMapper {
+
+    /**
+     * Converts an incoming request DTO into a fresh JPA entity for persistence.
+     */
+    public ClaimRecord toEntity(ClaimSubmissionRequest request) {
+        if (request == null) {
+            return null;
+        }
+
+        ClaimRecord record = new ClaimRecord();
+        record.setPolicyNumber(request.getPolicyNumber());
+        record.setReporterId(request.getReporterId());
+        record.setIncidentDate(request.getIncidentDate());
+        record.setClaimAmount(request.getClaimAmount());
+        record.setIncidentDescription(request.getIncidentDescription());
+        record.setExpedited(request.isExpedited());
+
+        return record;
+    }
+
+    /**
+     * Converts a persisted JPA entity back into a response DTO for the caller.
+     */
+    public ClaimResponse toResponse(ClaimRecord entity) {
+        if (entity == null) {
+            return null;
+        }
+
+        ClaimResponse response = new ClaimResponse();
+        response.setClaimId(entity.getClaimId());
+        response.setClaimStatus(entity.getStatus());
+
+        if (entity.getDocuments() != null && !entity.getDocuments().isEmpty()) {
+            response.setAttachedDocumentIds(
+                entity.getDocuments().stream()
+                    .map(doc -> doc.getDocumentId())
+                    .collect(Collectors.toList())
+            );
+        } else {
+            response.setAttachedDocumentIds(new ArrayList<>());
+        }
+
+        return response;
+    }
+}

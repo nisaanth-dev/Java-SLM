@@ -1,0 +1,198 @@
+CHUNK_ID: C001
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f01 (com.acme.insurance.claims.controller.ClaimController)
+
+LAYER: Controller
+
+ENTRY_POINT: yes
+
+=== CODE ===
+
+package com.acme.insurance.claims.controller;
+
+import com.acme.insurance.claims.dto.ClaimSubmissionRequest;
+import com.acme.insurance.claims.dto.ClaimResponse;
+import com.acme.insurance.claims.dto.DocumentUpdateRequest;
+import com.acme.insurance.claims.service.ClaimProcessingService;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import jakarta.validation.Valid;
+import java.util.List;
+import java.util.ArrayList;
+
+/**
+ * REST Controller for managing insurance claims.
+ * Handles the ingestion of new claims, status checks, and document updates.
+ */
+@RestController
+@RequestMapping("/api/v1/claims")
+public class ClaimController {
+
+    private static final Logger log = LoggerFactory.getLogger(ClaimController.class);
+    private final ClaimProcessingService claimProcessingService;
+
+    public ClaimController(ClaimProcessingService claimProcessingService) {
+        this.claimProcessingService = claimProcessingService;
+    }
+
+    /**
+     * Submits a new claim to the system.
+     */
+    @PostMapping("/submit")
+    public ResponseEntity<ClaimResponse> submitClaim(
+            @Valid @RequestBody ClaimSubmissionRequest request,
+            @RequestHeader(value = "X-Source-System", defaultValue = "WEB") String sourceSystem) {
+
+        log.info("Received claim submission from source system: {}", sourceSystem);
+
+        if (request == null) {
+            log.warn("Claim submission request payload is null");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+
+        ClaimResponse response = claimProcessingService.processNewClaim(request, sourceSystem);
+
+        if (response.getClaimStatus() != null && response.getClaimStatus().equals("REJECTED")) {
+            log.info("Claim submission was rejected automatically");
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(response);
+        }
+
+        if (response.getClaimStatus() != null && response.getClaimStatus().equals("PENDING_DOCUMENTS")) {
+            log.info("Claim submission requires additional documentation");
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
+        }
+
+        log.info("Claim submission created successfully with ID: {}", response.getClaimId());
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    /**
+     * Retrieves the current status of an existing claim.
+     */
+    @GetMapping("/{claimId}/status")
+    public ResponseEntity<ClaimResponse> getClaimStatus(@PathVariable("claimId") String claimId) {
+
+        log.info("Fetching status for claim ID: {}", claimId);
+
+        if (claimId == null || claimId.trim().isEmpty()) {
+            log.error("Provided claim ID is null or empty");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+
+        if (claimId.length() < 5) {
+            log.warn("Provided claim ID is too short, rejecting early");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+
+        ClaimResponse response = claimProcessingService.retrieveClaimStatus(claimId);
+
+        if (response == null) {
+            log.info("No claim found for ID: {}", claimId);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+
+        log.debug("Successfully retrieved claim status for ID: {}", claimId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Updates documents for an existing claim.
+     */
+    @PatchMapping("/{claimId}/documents")
+    public ResponseEntity<ClaimResponse> updateClaimDocuments(
+            @PathVariable("claimId") String claimId,
+            @Valid @RequestBody DocumentUpdateRequest documentRequest) {
+
+        log.info("Received document update request for claim ID: {}", claimId);
+
+        if (claimId == null || claimId.trim().isEmpty()) {
+            log.error("Provided claim ID is null or empty during document update");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+
+        if (documentRequest == null) {
+            log.error("Document update payload is null for claim ID: {}", claimId);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+
+        List<String> documentIds = documentRequest.getDocumentIds();
+        if (documentIds == null || documentIds.isEmpty()) {
+            log.warn("Document IDs list is empty for claim ID: {}", claimId);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+
+        ClaimResponse response = claimProcessingService.appendDocumentsToClaim(claimId, documentIds);
+
+        if (response == null) {
+            log.error("Failed to append documents, claim not found: {}", claimId);
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        }
+
+        log.info("Successfully updated documents for claim ID: {}", claimId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Submits multiple claims in a single batch operation.
+     */
+    @PostMapping("/submit-bulk")
+    public ResponseEntity<List<ClaimResponse>> submitBulkClaims(
+            @Valid @RequestBody List<ClaimSubmissionRequest> requests,
+            @RequestHeader(value = "X-Source-System", defaultValue = "BATCH_PROC") String sourceSystem) {
+
+        log.info("Received bulk claim submission. Total records: {}", requests != null ? requests.size() : 0);
+
+        if (requests == null || requests.isEmpty()) {
+            log.error("Bulk claim request list is null or empty");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        }
+
+        if (requests.size() > 50) {
+            log.warn("Bulk submission exceeds maximum allowed batch size of 50");
+            return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).build();
+        }
+
+        List<ClaimResponse> responses = new ArrayList<>();
+        int failureCount = 0;
+
+        for (ClaimSubmissionRequest req : requests) {
+            try {
+                ClaimResponse response = claimProcessingService.processNewClaim(req, sourceSystem);
+                responses.add(response);
+                if ("REJECTED".equals(response.getClaimStatus())) {
+                    failureCount++;
+                }
+            } catch (Exception ex) {
+                log.error("Error processing individual claim in bulk batch", ex);
+                failureCount++;
+                ClaimResponse errorResponse = new ClaimResponse();
+                errorResponse.setClaimStatus("SYSTEM_ERROR");
+                responses.add(errorResponse);
+            }
+        }
+
+        log.info("Completed bulk processing. Total failures: {}", failureCount);
+
+        if (failureCount == requests.size()) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(responses);
+        } else if (failureCount > 0) {
+            return ResponseEntity.status(HttpStatus.MULTI_STATUS).body(responses);
+        }
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(responses);
+    }
+}

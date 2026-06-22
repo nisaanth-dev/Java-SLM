@@ -1,0 +1,61 @@
+business_functional_name: |
+Claim Supporting Document Persistence
+
+core_business_functionality: |
+Defines the data structure for supplementary files attached to insurance
+claims. Dictates how file metadata is stored in the database and establishes
+the relationship linking the document back to its parent claim record.
+
+business_function: 
+  - Defines the core data attributes for a submitted document file.
+  - Enforces mandatory storage requirements for document identifiers and names.
+  - Records the exact physical storage size of the uploaded file.
+  - Permanently stamps the exact time the file was successfully uploaded.
+  - Establishes a strict linkage between the document and its parent claim record.
+
+business_functions_list: 
+  - Define Attributes
+  - Enforce Requirements
+  - Record Size
+  - Stamp Upload
+  - Establish Linkage
+
+business_rules: 
+  - rule_id: "C014_BR1"
+
+rule: "Every supporting document must be irrevocably linked to an existing, valid parent claim record within the system."
+
+condition: "A document record is being created"
+
+action: "Enforce linkage to a parent claim"
+
+occurrence: "C014_BR1"
+
+source_chunks: ["C014"]
+
+Imports
+This chunk imports standard Java persistence API annotations (`Entity`,
+`Table`, `Id`, `Column`, `ManyToOne`, `JoinColumn`, `FetchType`) which provide
+the capabilities to map this class to a relational database table and define
+relationships. It imports standard Java `LocalDateTime`. It imports Lombok
+annotations (`Getter`, `Setter`, `NoArgsConstructor`) to automatically
+generate property accessors and a default constructor.
+
+Class-Level Declarations
+The `ClaimDocumentEntity` class is annotated with `@Entity`, marking it as a
+JPA managed entity, and `@Table(name = "CLM_DOCUMENT")`, defining its physical
+database table name. The `@Getter`, `@Setter`, and `@NoArgsConstructor`
+annotations generate structural methods.
+
+Fields
+The class declares the following fields:
+
+  - `documentId`: A `String` representing the unique file identifier. It is annotated with `@Id` designating it as the primary key, and `@Column(name = "DOCUMENT_ID", nullable = false, updatable = false, length = 36)`, enforcing that it maps to the `DOCUMENT_ID` column, cannot be null, cannot be changed once set, and is capped at 36 characters.
+
+  - `claimRecord`: A `ClaimRecord` representing the parent claim. It is annotated with `@ManyToOne(fetch = FetchType.LAZY)`, indicating many documents can belong to one claim and that the parent is loaded on-demand. It is annotated with `@JoinColumn(name = "CLAIM_ID", nullable = false)`, enforcing the foreign key constraint on the `CLAIM_ID` column.
+
+  - `fileName`: A `String` representing the original name of the uploaded file. Annotated with `@Column(name = "FILE_NAME", nullable = false, length = 255)`.
+
+  - `fileSizeBytes`: A `Long` representing the file's size in bytes. Annotated with `@Column(name = "FILE_SIZE_BYTES", nullable = false)`.
+
+  - `uploadedAt`: A `LocalDateTime` representing the exact upload timestamp. Annotated with `@Column(name = "UPLOADED_AT", nullable = false, updatable = false)`.

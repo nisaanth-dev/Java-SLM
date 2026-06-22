@@ -1,0 +1,103 @@
+business_functional_name: |
+System Trace Context Establishment
+
+core_business_functionality: |
+Intercepts every incoming interaction with the system to ensure it can be
+tracked across all downstream processing. Extracts existing tracking
+identifiers from external callers or generates new ones if none are provided,
+appending them to the communication logs.
+
+business_function: 
+  - Intercepts incoming network requests.
+  - Identifies incoming trace identifiers.
+  - Generates trace identifiers for requests lacking them.
+  - Attaches trace identifiers to system logging context.
+  - Injects trace identifiers into the outgoing response.
+  - Cleans up tracking data after processing concludes.
+
+business_functions_list: 
+  - Intercept Request
+  - Identify Trace
+  - Generate Identifier
+  - Attach Context
+  - Inject Response
+  - Cleanup Context
+
+business_rules: 
+  - rule_id: "C010_BR1"
+
+rule: "Every transaction entering the system must possess a unique trace identifier for auditing; if the external caller does not provide one, the system must generate a new, unique identifier."
+
+condition: "Incoming request lacks a valid trace identifier header"
+
+action: "Generate a new trace identifier"
+
+occurrence: "C010_BR1"
+
+source_chunks: ["C010"]
+
+  - rule_id: "C010_BR2"
+
+rule: "To ensure end-to-end tracking visibility, the established trace identifier must be explicitly returned to the caller in the response headers."
+
+condition: "A trace identifier is established for the transaction"
+
+action: "Attach identifier to the outbound response"
+
+occurrence: "C010_BR2"
+
+source_chunks: ["C010"]
+
+Imports
+This chunk imports standard Java EE Servlet interfaces (`Filter`,
+`FilterChain`, `ServletException`, `ServletRequest`, `ServletResponse`,
+`HttpServletRequest`, `HttpServletResponse`) which provide the capabilities to
+intercept and process web traffic. It imports the Spring `@Component`
+annotation, SLF4J `MDC` (Mapped Diagnostic Context) for thread-local logging
+data, and standard Java `IOException` and `UUID`.
+
+Class-Level Declarations
+The `SystemContextFilter` class implements the `Filter` interface and is
+annotated with `@Component` to register it within the servlet container. It
+declares two string constants: `TRACE_HEADER` initialized to `"X-B3-TraceId"`,
+and `MDC_KEY` initialized to `"traceId"`.
+
+Primary Flow: doFilter
+The `doFilter` method acts as an external entry point triggered by the web
+container for every incoming HTTP request. It returns `void` and accepts a
+`ServletRequest` named `request`, a `ServletResponse` named `response`, and a
+`FilterChain` named `chain`. It declares that it throws `IOException` and
+`ServletException`.
+
+An `if` statement checks whether the `request` is NOT an instance of
+`HttpServletRequest`, OR whether the `response` is NOT an instance of
+`HttpServletResponse`. If this condition is true, it calls the external method
+`chain.doFilter(request, response)` to pass the request along untouched, and
+executes a `return` statement to terminate execution in this filter. If false,
+execution continues.
+
+The method downcasts the arguments, declaring `httpRequest` and `httpResponse`
+of type `HttpServletRequest` and `HttpServletResponse` respectively, assigned
+from the original inputs.
+
+It declares a `String` named `traceId` and assigns it the return value of the
+external call `httpRequest.getHeader(TRACE_HEADER)`.
+
+An `if` statement checks whether `traceId` is `null` or if
+`traceId.trim().isEmpty()` is true. If this condition is true (the caller did
+not provide a tracking ID), it assigns `traceId` a newly generated identifier
+via `UUID.randomUUID().toString()`. If false, execution continues with the
+existing value.
+
+The method calls `MDC.put(MDC_KEY, traceId)` to inject the identifier into the
+logging context, and `httpResponse.setHeader(TRACE_HEADER, traceId)` to ensure
+the caller receives it back.
+
+A `try / finally` block controls the continuation of the request.
+Inside the `try` block, it calls `chain.doFilter(httpRequest, httpResponse)`,
+transferring control out to the next filter or controller in the application
+flow. Control returns when the downstream processing is completely finished.
+The `finally` block guarantees execution regardless of success or failure.
+Inside, it calls `MDC.remove(MDC_KEY)`. The business significance is that the
+thread-local context is cleanly purged so that subsequent requests handled by
+the same server thread do not inherit a stale trace identifier.

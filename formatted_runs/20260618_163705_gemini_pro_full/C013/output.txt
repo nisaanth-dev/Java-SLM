@@ -1,0 +1,97 @@
+business_functional_name: |
+Administrative Claim Override Management
+
+core_business_functionality: |
+Provides privileged operational capabilities to manually alter the processing
+trajectory of an insurance claim. Allows authorized personnel to force a claim
+into an approved or rejected state directly, bypassing standard automated
+workflows.
+
+business_function: 
+  - Facilitates manual authorization of a claim by administrative personnel.
+  - Secures the approval process by validating the presence of a claim identifier.
+  - Facilitates manual rejection of a claim by administrative personnel.
+  - Mandates the inclusion of a justification reason when a claim is manually rejected.
+
+business_functions_list: 
+  - Authorize Claim
+  - Validate Identifier
+  - Reject Claim
+  - Mandate Justification
+
+business_rules: 
+  - rule_id: "C013_BR1"
+
+rule: "When an administrator attempts to manually approve a claim, the request must be rejected immediately if the claim identifier is missing or blank."
+
+condition: "Claim identifier is missing or blank during manual approval"
+
+action: "Reject the approval request"
+
+occurrence: "C013_BR1"
+
+source_chunks: ["C013"]
+
+  - rule_id: "C013_BR2"
+
+rule: "When an administrator attempts to manually reject a claim, the request must be rejected if either the claim identifier or the rejection justification is missing."
+
+condition: "Claim identifier or justification reason is missing during manual rejection"
+
+action: "Reject the rejection request"
+
+occurrence: "C013_BR2"
+
+source_chunks: ["C013"]
+
+Imports
+This chunk imports `ClaimResponse` from the `com.acme.insurance.claims.dto`
+layer for returning standardized output, and `ClaimRoutingService` from the
+`com.acme.insurance.claims.service` layer to execute the business rules. It
+imports Spring Framework web components (`HttpStatus`, `ResponseEntity`,
+`PutMapping`, `PathVariable`, `RequestParam`, `RestController`,
+`RequestMapping`) to expose and manage the REST endpoints, and SLF4J `Logger`
+and `LoggerFactory` for logging operations.
+
+Class-Level Declarations
+The `AdminController` class is annotated with `@RestController` to serve HTTP
+requests and `@RequestMapping("/api/v1/admin/claims")` to define its base URI
+path. It declares a constant `Logger` named `log`. It declares a private,
+final injected dependency `claimRoutingService` of type `ClaimRoutingService`,
+which is initialized via a constructor.
+
+Primary Flow: approveClaim
+The `approveClaim` method is exposed via `@PutMapping("/{claimId}/approve")`
+as an entry point. It returns a `ResponseEntity<ClaimResponse>` and accepts a
+`String` named `claimId` mapped via `@PathVariable("claimId")`.
+
+The method logs the manual approval action for the `claimId`. An `if`
+statement checks whether `claimId` is `null` or if `claimId.trim().isEmpty()`
+evaluates to true. If this condition is true, the method returns a
+`ResponseEntity` constructed with `HttpStatus.BAD_REQUEST` and terminates. If
+false, execution continues.
+
+The method declares a local variable `response` of type `ClaimResponse` and
+assigns it the return value of an external method call to
+`claimRoutingService.forceApprove(claimId)`. Control transfers out to the
+routing service and returns with the outcome. Finally, it returns a
+`ResponseEntity.ok(response)` containing the successful status and body.
+
+Supporting Elements in This Chunk
+The `rejectClaim` method is exposed via `@PutMapping("/{claimId}/reject")`. It
+returns a `ResponseEntity<ClaimResponse>` and accepts a `String` `claimId`
+mapped via `@PathVariable("claimId")`, and a `String` `reason` mapped via
+`@RequestParam("reason")`.
+
+The method logs the rejection attempt with both the identifier and the
+justification. An `if` statement evaluates a compound condition: whether
+`claimId` is `null`, OR `claimId.trim().isEmpty()` is true, OR `reason` is
+`null`, OR `reason.trim().isEmpty()` is true. If this condition evaluates to
+true (meaning either input is missing or blank), it returns a `ResponseEntity`
+built with `HttpStatus.BAD_REQUEST` and terminates. If false, execution
+continues.
+
+The method declares a local variable `response` of type `ClaimResponse` and
+assigns it the return value of the external method call
+`claimRoutingService.forceReject(claimId, reason)`. Control transfers out and
+returns. It then returns `ResponseEntity.ok(response)`.

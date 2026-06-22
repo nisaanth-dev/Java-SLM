@@ -1,0 +1,85 @@
+business_functional_name: |
+Claim Data Access And State Queries
+
+core_business_functionality: |
+Provides direct access to the underlying storage for claim records. Enables
+the identification of claims that are delayed in processing and enforces
+strict, atomic rules when updating a claim's status to prevent conflicting
+updates.
+
+business_function: 
+  - Retrieves records from the database.
+  - Identifies claims lingering in a specific state beyond a time limit.
+  - Updates the current processing status of an existing claim.
+  - Prevents status updates if the claim is not in the expected prior state.
+
+business_functions_list: 
+  - Retrieve Records
+  - Identify Delays
+  - Update Status
+  - Prevent Conflicts
+
+business_rules: 
+  - rule_id: "C005_BR1"
+
+rule: "To identify delayed claims, the system must filter for claims matching a specific status where the creation date is strictly older than a provided cutoff threshold."
+
+condition: "Claim status matches target and creation date is older than cutoff"
+
+action: "Include claim in delayed list"
+
+occurrence: "C005_BR1"
+
+source_chunks: ["C005"]
+
+  - rule_id: "C005_BR2"
+
+rule: "A claim's status can only be updated if its current status exactly matches the expected prior status; otherwise, the update is rejected to prevent processing conflicts."
+
+condition: "Target claim identifier matches and current status matches the expected old status"
+
+action: "Update the status to the new value and refresh the modification timestamp"
+
+occurrence: "C005_BR2"
+
+source_chunks: ["C005"]
+
+Imports
+This chunk imports ClaimRecord from the com.acme.insurance.claims.entity layer
+to represent the data model being accessed. It imports external Spring Data
+JPA interfaces and annotations (JpaRepository, Modifying, Query, Param,
+Repository) which provide the capabilities to execute database operations and
+map method parameters to query variables. It imports standard Java types
+LocalDateTime and List for date boundaries and collection returns.
+
+Class-Level Declarations
+The ClaimRepository interface is annotated with @Repository, marking it as a
+data access component. It extends JpaRepository<ClaimRecord, String>,
+inheriting standard database operations for the ClaimRecord entity with a
+String primary key.
+
+Primary Flow: findStaleClaimsByStatus
+The findStaleClaimsByStatus method is declared to return a List<ClaimRecord>.
+It accepts two parameters: a String named status bound via @Param("status"),
+and a LocalDateTime named cutoffDate bound via @Param("cutoffDate"). It is
+annotated with @Query containing the exact JPQL statement: "SELECT c FROM
+ClaimRecord c WHERE c.status = :status AND c.createdAt < :cutoffDate". The
+execution of this method triggers the framework to issue this query to the
+database, passing the status and cutoffDate arguments, and returning all
+ClaimRecord entities that satisfy the condition where their status equals the
+input and their creation timestamp is older than the cutoff.
+
+Supporting Elements in This Chunk
+The transitionClaimStatus method returns an int representing the number of
+rows affected. It is annotated with @Modifying, indicating it alters data
+rather than just reading it. It accepts three parameters: a String claimId
+mapped to @Param("claimId"), a String expectedOldStatus mapped to
+@Param("expectedOldStatus"), and a String newStatus mapped to
+@Param("newStatus"). It is annotated with a @Query containing the exact JPQL
+statement: "UPDATE ClaimRecord c SET c.status = :newStatus, c.updatedAt =
+CURRENT_TIMESTAMP WHERE c.claimId = :claimId AND c.status =
+:expectedOldStatus". When called, this executes an atomic database update,
+changing the status to newStatus and the update timestamp to the current
+database time, strictly conditionally upon the record matching the claimId and
+currently holding the expectedOldStatus. It returns the count of updated
+records (typically 1 for success, 0 if the condition failed).

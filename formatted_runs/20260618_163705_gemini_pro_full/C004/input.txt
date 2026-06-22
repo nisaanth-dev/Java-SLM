@@ -1,0 +1,123 @@
+CHUNK_ID: C004
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f04 (com.acme.insurance.claims.service.impl.ClaimProcessingServiceImpl)
+
+LAYER: Service
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.acme.insurance.claims.service.impl;
+
+import com.acme.insurance.claims.dto.ClaimSubmissionRequest;
+import com.acme.insurance.claims.dto.ClaimResponse;
+import com.acme.insurance.claims.entity.ClaimRecord;
+import com.acme.insurance.claims.repository.ClaimRepository;
+import com.acme.insurance.claims.service.ClaimProcessingService;
+import com.acme.insurance.claims.mapper.ClaimEntityMapper;
+import com.acme.insurance.claims.exception.ClaimSystemException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.util.List;
+import java.math.BigDecimal;
+
+/**
+ * Core service implementation for orchestrating claim ingestion rules.
+ */
+@Service
+public class ClaimProcessingServiceImpl implements ClaimProcessingService {
+
+    private static final Logger log = LoggerFactory.getLogger(ClaimProcessingServiceImpl.class);
+    private static final String TOPIC_CLAIM_EVENTS = "acme.claims.ingestion.events";
+
+    private final ClaimRepository claimRepository;
+    private final ClaimEntityMapper claimMapper;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
+
+    public ClaimProcessingServiceImpl(ClaimRepository claimRepository,
+            ClaimEntityMapper claimMapper,
+            KafkaTemplate<String, Object> kafkaTemplate) {
+        this.claimRepository = claimRepository;
+        this.claimMapper = claimMapper;
+        this.kafkaTemplate = kafkaTemplate;
+    }
+
+    @Override
+    @Transactional
+    public ClaimResponse processNewClaim(ClaimSubmissionRequest request, String sourceSystem) {
+        log.info("Executing core processing for new claim from policy: {}", request.getPolicyNumber());
+
+        ClaimRecord record = claimMapper.toEntity(request);
+        record.setSourceSystem(sourceSystem);
+
+        determineInitialRoutingStatus(record, request);
+
+        ClaimRecord savedRecord;
+        try {
+            savedRecord = claimRepository.save(record);
+            log.debug("Claim saved successfully with generated ID: {}", savedRecord.getClaimId());
+        } catch (Exception ex) {
+            log.error("Database transaction failed during claim persistence", ex);
+            throw new ClaimSystemException("E_DB_001", "Failed to persist new claim record", ex);
+        }
+
+        publishClaimEvent("CLAIM_CREATED", savedRecord);
+
+        return claimMapper.toResponse(savedRecord);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ClaimResponse retrieveClaimStatus(String claimId) {
+        ClaimRecord record = claimRepository.findById(claimId).orElse(null);
+        if (record == null) {
+            return null;
+        }
+        return claimMapper.toResponse(record);
+    }
+
+    /**
+     * Evaluates business thresholds to assign the correct starting status.
+     */
+    private void determineInitialRoutingStatus(ClaimRecord record, ClaimSubmissionRequest request) {
+        if (request.getClaimAmount() != null && request.getClaimAmount().compareTo(new BigDecimal("100000.00")) > 0) {
+            log.warn("Claim exceeds auto-adjudication limits. Routing to manual review.");
+            record.setStatus("REJECTED_MANUAL_REVIEW");
+            return;
+        }
+
+        if (!request.hasSupportingDocuments()) {
+            log.info("Claim lacks supporting documents. Placing in pending queue.");
+            record.setStatus("PENDING_DOCUMENTS");
+            return;
+        }
+
+        if (request.requiresUrgentReview()) {
+            record.setStatus("EXPEDITED_ADJUDICATION");
+        } else {
+            record.setStatus("PENDING_ADJUDICATION");
+        }
+    }
+
+    /**
+     * Emits a domain event to the message broker.
+     */
+    private void publishClaimEvent(String eventType, ClaimRecord record) {
+        try {
+            ClaimResponse eventPayload = claimMapper.toResponse(record);
+            eventPayload.setClaimStatus(eventType);
+            kafkaTemplate.send(TOPIC_CLAIM_EVENTS, record.getClaimId(), eventPayload);
+            log.info("Published event {} for claim ID {}", eventType, record.getClaimId());
+        } catch (Exception ex) {
+            log.error("Failed to publish Kafka event for claim {}, proceeding without event", record.getClaimId(), ex);
+        }
+    }
+}

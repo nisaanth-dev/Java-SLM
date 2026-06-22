@@ -1,0 +1,152 @@
+business_functional_name: |
+Core Claim Persistence Structure
+
+core_business_functionality: |
+Defines the data structure for a submitted insurance claim and coordinates how
+it is stored within the system of record. Automatically manages system
+timestamps, handles state initialization, and secures the relationship between
+claims and their supporting files.
+
+business_function: 
+  - Defines the core data attributes for a recorded claim.
+  - Enforces field-level storage constraints and precision limits.
+  - Automatically records the exact time of claim creation and modification.
+  - Defaults the initial processing status for newly recorded claims.
+  - Determines if a claim has reached a final, non-editable conclusion.
+  - Links supplementary files securely to the core record.
+
+business_functions_list: 
+  - Define Attributes
+  - Enforce Storage
+  - Record Timestamps
+  - Default Status
+  - Determine Finality
+  - Link Files
+
+business_rules: 
+  - rule_id: "C003_BR1"
+
+rule: "When a new claim is initially recorded, the exact date and time of creation must be permanently stamped on the record."
+
+condition: "A claim record is being created for the first time"
+
+action: "Stamp creation timestamp"
+
+occurrence: "C003_BR1"
+
+source_chunks: ["C003"]
+
+  - rule_id: "C003_BR2"
+
+rule: "If a newly recorded claim does not have an explicit status assigned, it is automatically categorized as received."
+
+condition: "New claim record lacks a processing status"
+
+action: "Set status to received"
+
+occurrence: "C003_BR2"
+
+source_chunks: ["C003"]
+
+  - rule_id: "C003_BR3"
+
+rule: "Whenever an existing claim record is altered, the date and time of the alteration must be updated immediately."
+
+condition: "A claim record is being modified"
+
+action: "Update modification timestamp"
+
+occurrence: "C003_BR3"
+
+source_chunks: ["C003"]
+
+  - rule_id: "C003_BR4"
+
+rule: "A claim is considered finalized and locked from standard processing if its status is approved, denied, or withdrawn."
+
+condition: "Claim status equals approved, denied, or withdrawn"
+
+action: "Classify claim as being in a terminal state"
+
+occurrence: "C003_BR4"
+
+source_chunks: ["C003"]
+
+Imports
+This chunk imports standard Java persistence API (JPA) annotations (Entity,
+Table, Id, GeneratedValue, GenerationType, Column, Version, PrePersist,
+PreUpdate, Enumerated, EnumType, OneToMany, CascadeType, FetchType) which
+provide the capabilities to map the Java class to a relational database table
+and manage its lifecycle. It imports standard Java types BigDecimal,
+LocalDate, LocalDateTime, ArrayList, and List for data representation. It
+imports Lombok annotations (Getter, Setter, NoArgsConstructor,
+AllArgsConstructor, Builder) which generate class boilerplate behavior such as
+property accessors and object construction patterns.
+
+Class-Level Declarations
+The ClaimRecord class is annotated with @Entity, marking it as a JPA managed
+entity, and @Table(name = "CLM_RECORD"), specifying that it maps to the
+physical database table named CLM_RECORD. It is annotated with @Getter and
+@Setter to generate read and write accessors for all fields,
+@NoArgsConstructor to generate a default empty constructor,
+@AllArgsConstructor to generate a full constructor, and @Builder to generate a
+builder pattern implementation for object instantiation.
+
+Fields
+The class declares the following fields in order:
+
+  - claimId: A String representing the unique identifier for the claim. It is annotated with @Id marking it as the primary key. It uses @GeneratedValue(strategy = GenerationType.UUID) to automatically generate a UUID upon creation. The @Column(name = "CLAIM_ID", updatable = false, nullable = false, length = 36) annotation maps it to the CLAIM_ID column, enforces that it cannot be updated after creation, cannot be null, and has a maximum length of 36.
+
+  - policyNumber: A String representing the associated policy. Annotated with @Column(name = "POLICY_NUMBER", nullable = false, length = 15).
+
+  - reporterId: A String representing the reporter. Annotated with @Column(name = "REPORTER_ID", nullable = false, length = 50).
+
+  - incidentDate: A LocalDate representing the incident date. Annotated with @Column(name = "INCIDENT_DATE", nullable = false).
+
+  - claimAmount: A BigDecimal representing the financial value. Annotated with @Column(name = "CLAIM_AMOUNT", nullable = false, precision = 12, scale = 2), enforcing a total of 12 digits with 2 decimal places.
+
+  - incidentDescription: A String representing the narrative. Annotated with @Column(name = "INCIDENT_DESC", length = 2000).
+
+  - isExpedited: A boolean representing an urgency flag. Annotated with @Column(name = "IS_EXPEDITED", nullable = false).
+
+  - status: A String representing the current processing state. Annotated with @Column(name = "CLAIM_STATUS", nullable = false, length = 30).
+
+  - sourceSystem: A String representing the origin of the claim data. Annotated with @Column(name = "SOURCE_SYSTEM", nullable = false, length = 20).
+
+  - documents: A List<ClaimDocumentEntity> representing a collection of associated files. It is annotated with @OneToMany(mappedBy = "claimRecord", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true). This establishes a one-to-many relationship where the claimRecord field on the child entity owns the mapping, all persistence operations cascade to the children, records are loaded lazily from the database, and removed children are deleted from the database. It is annotated with @Builder.Default to integrate with Lombok, and is initialized to a new ArrayList<>().
+
+  - version: A Long representing the optimistic locking counter. It is annotated with @Version to enable concurrent update protection, and @Column(name = "OPTLOCK_VERSION").
+
+  - createdAt: A LocalDateTime representing the creation timestamp. Annotated with @Column(name = "CREATED_AT", updatable = false, nullable = false).
+
+  - updatedAt: A LocalDateTime representing the last modification timestamp. Annotated with @Column(name = "UPDATED_AT").
+
+Methods
+The onCreate method returns void and is annotated with @PrePersist, meaning
+the JPA framework will execute it automatically just before the entity is
+saved to the database for the first time. Inside, it assigns the current
+system time via LocalDateTime.now() to the createdAt field. It then assigns
+the value of createdAt to the updatedAt field. An if statement checks whether
+the status field is null. If this condition is true, it assigns the literal
+value "RECEIVED" to status. If false, execution continues normally.
+
+The onUpdate method returns void and is annotated with @PreUpdate, meaning it
+executes automatically just before an existing entity is updated in the
+database. Inside, it assigns the current system time via LocalDateTime.now()
+to the updatedAt field.
+
+The addDocument method returns void and accepts a single parameter: a
+ClaimDocumentEntity named document. An if statement checks whether document is
+not null. If this condition is true, it calls this.documents.add(document) to
+add the document to the internal list, and then calls
+document.setClaimRecord(this) to explicitly set the bidirectional reference on
+the child entity back to this parent. If the condition is false, the method
+does nothing.
+
+The isTerminalState method returns a boolean. An if statement checks whether
+this.status is null. If this condition is true, the method returns false and
+terminates. If false, the method returns the evaluated result of a compound
+boolean expression: this.status.equals("APPROVED") ||
+this.status.equals("DENIED") || this.status.equals("WITHDRAWN"). If the status
+matches any of these three literals, it returns true; otherwise, it returns
+false.

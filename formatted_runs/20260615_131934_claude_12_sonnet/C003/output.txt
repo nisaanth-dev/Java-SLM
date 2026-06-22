@@ -1,0 +1,355 @@
+business_functional_name: |
+Loan Decision Recording And Application Cancellation
+
+core_business_functionality: |
+This chunk records a final decision â approval, rejection, or referral to
+manual review â against a pending loan application, updating its status and
+triggering a notification when an application is approved. It also allows a
+loan application to be cancelled, provided it has not already been approved.
+
+business_function: |
+A decision can be recorded against a loan application that is not already in a
+terminal status.
+An approved application has its approved amount and decision timestamp
+recorded.
+A rejected application has a rejection reason and decision timestamp recorded.
+An application referred to manual review has its status updated accordingly.
+An approval triggers a notification to other parts of the organization.
+A loan application can be cancelled unless it has already been approved.
+
+business_functions_list: 
+  - Record Decision
+  - Approve Application
+  - Reject Application
+  - Refer Manual Review
+  - Notify Approval
+  - Cancel Application
+
+business_rules: 
+  - rule_id: "C003_BR1"
+
+rule: "A decision cannot be recorded for a loan application that has already reached a final approved or rejected status."
+
+condition: "The loan application's current status is already approved or already rejected"
+
+action: "The request to record a new decision is rejected as invalid for the application's current state"
+
+occurrence: "C003_BR1"
+
+source_chunks: ["C003"]
+
+  - rule_id: "C003_BR2"
+
+rule: "When a loan application is approved, the amount approved is set equal to the amount originally requested, and the date and time of the decision is recorded."
+
+condition: "The decision outcome is approval"
+
+action: "The application's status becomes approved, its approved amount is set to the requested amount, and the decision time is recorded"
+
+occurrence: "C003_BR2"
+
+source_chunks: ["C003"]
+
+  - rule_id: "C003_BR3"
+
+rule: "When a loan application is rejected during the manual decision step, a standard rejection reason is recorded along with the date and time of the decision."
+
+condition: "The decision outcome is rejection"
+
+action: "The application's status becomes rejected, a rejection reason is recorded, and the decision time is recorded"
+
+occurrence: "C003_BR3"
+
+source_chunks: ["C003"]
+
+  - rule_id: "C003_BR4"
+
+rule: "When a loan application is referred for manual review as its decision outcome, its status is updated to reflect that it is awaiting manual review, without recording a decision timestamp."
+
+condition: "The decision outcome is manual review"
+
+action: "The application's status becomes pending manual review"
+
+occurrence: "C003_BR4"
+
+source_chunks: ["C003"]
+
+  - rule_id: "C003_BR5"
+
+rule: "If a decision outcome is supplied that does not correspond to any recognized decision type, the decision cannot be recorded."
+
+condition: "The decision outcome does not match approval, rejection, or manual review"
+
+action: "The request to record the decision is rejected as invalid"
+
+occurrence: "C003_BR5"
+
+source_chunks: ["C003"]
+
+  - rule_id: "C003_BR6"
+
+rule: "Whenever a loan application is approved, the organization is notified of the approval and the amount approved so that downstream processes (such as funding) can begin."
+
+condition: "A decision results in the application's status becoming approved"
+
+action: "An approval notification is issued containing the application's identifier and the approved amount"
+
+occurrence: "C003_BR6"
+
+source_chunks: ["C003"]
+
+  - rule_id: "C003_BR7"
+
+rule: "An applicant may cancel their loan application at any point before it has been approved."
+
+condition: "The loan application's current status is anything other than approved"
+
+action: "The application's status is changed to cancelled"
+
+occurrence: "C003_BR7"
+
+source_chunks: ["C003"]
+
+  - rule_id: "C003_BR8"
+
+rule: "An application that has already been approved can no longer be cancelled."
+
+condition: "The loan application's current status is already approved"
+
+action: "The request to cancel the application is rejected as invalid for the application's current state"
+
+occurrence: "C003_BR8"
+
+source_chunks: ["C003"]
+---
+
+This chunk does not include an imports block, as it is a continuation of the
+LoanApplicationService class body (file f02) and does not begin at the top of
+its source file; no imports are narrated here.
+
+The primary flow of this chunk is the recordDecision method, as it is the
+method the controller's decideApplication endpoint (from the first chunk)
+calls into, representing this chunk's main business operation.
+
+The method recordDecision is declared as public, is annotated with
+@Transactional (meaning the entire method executes within a single database
+transaction, and if an unhandled exception propagates out, any database
+changes made within it are rolled back), and returns a LoanDecisionResponse.
+It takes two parameters: applicationId, of type Long, representing the
+identifier of the loan application being decided, and decisionOutcome, of type
+String, representing the normalized (uppercase) decision outcome supplied by
+the caller.
+
+The first statement declares a local variable named loanApplication of type
+LoanApplication, assigned the result of
+loanApplicationRepository.findById(applicationId).orElseThrow(() -> new
+LoanApplicationNotFoundException("Loan application not found for id: " +
+applicationId)). This is a repository data access call: findById is invoked
+with applicationId as its parameter, returning an Optional<LoanApplication>
+â either populated with the matching entity or empty if none exists. If the
+Optional is empty, orElseThrow immediately constructs and throws a new
+LoanApplicationNotFoundException, with its message formed by concatenating the
+literal "Loan application not found for id: " with the value of applicationId.
+This throw terminates recordDecision; since the method is @Transactional and
+no changes have been made yet, no rollback of data is needed, but the
+transaction is marked accordingly, and the caller receives an error indicating
+the application was not found. If the Optional is populated, its contained
+LoanApplication is unwrapped and assigned to loanApplication, and execution
+continues.
+
+The next statement declares a local variable named previousStatus of type
+String, assigned the value of loanApplication.getStatus() â capturing the
+loan application's status as it was before this decision is applied, for later
+use in both the conditional check that follows and in the response constructed
+later.
+
+The next statement is an if statement checking the compound condition
+"APPROVED".equals(previousStatus) || "REJECTED".equals(previousStatus) â
+that is, whether previousStatus is exactly equal to the literal string
+"APPROVED", OR whether previousStatus is exactly equal to the literal string
+"REJECTED" (using the literals as receivers of equals, so a null
+previousStatus would safely evaluate both as false). If this condition is true
+â meaning the loan application's status before this decision was already
+"APPROVED" or already "REJECTED", i.e., it is already in a terminal status â
+the method immediately constructs and throws a new InvalidLoanStateException,
+with its message formed by concatenating the literal "Cannot change decision
+for application already in terminal status: " with the value of
+previousStatus. This throw terminates recordDecision; the caller receives an
+error indicating the decision could not be recorded because the application is
+already finalized. If the condition is false â meaning previousStatus is
+neither "APPROVED" nor "REJECTED" â execution continues to the next
+statement.
+
+The next statement is a switch statement on the value of decisionOutcome, with
+four cases.
+
+The first case, case "APPROVED":, matches when decisionOutcome is exactly
+equal to the literal string "APPROVED". In this case, three statements
+execute: loanApplication.setStatus("APPROVED") sets the application's status
+field to the literal string "APPROVED";
+loanApplication.setApprovedAmount(loanApplication.getRequestedAmount()) sets
+the approved amount field to the value currently held in the application's
+requested amount field â meaning the amount approved is set equal to the
+amount the applicant originally requested; and
+loanApplication.setDecisionedAt(LocalDateTime.now()) sets the decision
+timestamp field to the current date and time at the moment of execution. The
+case then terminates with a break statement, exiting the switch.
+
+The second case, case "REJECTED":, matches when decisionOutcome is exactly
+equal to the literal string "REJECTED". In this case, three statements
+execute: loanApplication.setStatus("REJECTED") sets the application's status
+field to the literal string "REJECTED";
+loanApplication.setRejectionReason("Rejected during manual decision step")
+sets the rejection reason field to the literal string "Rejected during manual
+decision step"; and loanApplication.setDecisionedAt(LocalDateTime.now()) sets
+the decision timestamp field to the current date and time at the moment of
+execution. The case then terminates with a break statement, exiting the
+switch.
+
+The third case, case "MANUAL_REVIEW":, matches when decisionOutcome is exactly
+equal to the literal string "MANUAL_REVIEW". In this case, a single statement
+executes: loanApplication.setStatus("PENDING_MANUAL_REVIEW") sets the
+application's status field to the literal string "PENDING_MANUAL_REVIEW".
+Notably, no decision timestamp is set in this case, unlike the APPROVED and
+REJECTED cases. The case then terminates with a break statement, exiting the
+switch.
+
+The default: case matches when decisionOutcome does not equal any of
+"APPROVED", "REJECTED", or "MANUAL_REVIEW". In this case, the method
+immediately constructs and throws a new InvalidLoanStateException, with its
+message formed by concatenating the literal "Unrecognized decision outcome: "
+with the value of decisionOutcome. This throw terminates recordDecision; the
+caller receives an error indicating the decision outcome was not recognized.
+(In practice, because the controller in the first chunk already validates and
+normalizes decisionOutcome to one of the three accepted values before calling
+this method, this default branch represents a defensive guard against an
+outcome value that should not occur given the controller's validation â it
+is an absence of redundant trust, narrated here as present in the code
+regardless.)
+
+After the switch statement (reached only via the APPROVED, REJECTED, or
+MANUAL_REVIEW cases, since the default case throws), the next statement
+declares a local variable named updatedApplication of type LoanApplication,
+assigned the result of loanApplicationRepository.save(loanApplication). This
+is a repository data access call: save is invoked with the modified
+loanApplication entity (with its status, and possibly
+approvedAmount/rejectionReason/decisionedAt fields updated per the switch case
+taken) as its parameter, persisting these changes to the database and
+returning the persisted entity as updatedApplication.
+
+The next statement declares a local variable named decisionResponse of type
+LoanDecisionResponse, assigned the result of new LoanDecisionResponse() â
+constructing a new, empty decision response object representing the outcome of
+this decision-recording operation.
+
+The following four statements populate decisionResponse via setters:
+decisionResponse.setApplicationId(updatedApplication.getId()) sets the
+response's application identifier to the persisted application's identifier;
+decisionResponse.setPreviousStatus(previousStatus) sets the response's
+previous-status field to the value captured earlier, before the decision was
+applied; decisionResponse.setNewStatus(updatedApplication.getStatus()) sets
+the response's new-status field to the persisted application's current status
+(i.e., the status after the switch statement's update); and
+decisionResponse.setDecisionedAt(updatedApplication.getDecisionedAt()) sets
+the response's decision-timestamp field to the persisted application's
+decision timestamp (which will be null if the MANUAL_REVIEW case was taken,
+since that case does not set this field).
+
+The next statement is an if statement checking whether
+"APPROVED".equals(updatedApplication.getStatus()) is true â that is, whether
+the persisted application's status, after the switch statement's update, is
+exactly equal to the literal string "APPROVED". If this condition is true â
+meaning this decision resulted in the application being approved â the
+statement loanDecisionEventPublisher.publishLoanApprovedEvent(updatedApplicati
+on.getId(), updatedApplication.getApprovedAmount()) executes. This is an
+internal call to the loanDecisionEventPublisher dependency's
+publishLoanApprovedEvent method, passing the persisted application's
+identifier (updatedApplication.getId()) and its approved amount
+(updatedApplication.getApprovedAmount()) as arguments. Control transfers out
+to this event-publishing operation (defined in a different component),
+representing the business action of notifying the rest of the organization
+that this loan application has been approved and for how much; per the cross-
+chunk call rule, the internal logic of publishLoanApprovedEvent (e.g., how the
+notification is transmitted) is not narrated here. The call does not produce a
+return value used by this method (the call is a standalone statement). If the
+condition is false â meaning the decision did not result in an "APPROVED"
+status (i.e., it resulted in "REJECTED" or "PENDING_MANUAL_REVIEW") â this
+statement is skipped entirely, and no approval notification is sent.
+
+The next statement calls logger.info with the format string "Decision recorded
+for applicationId={}: {} -> {}" and the arguments applicationId,
+previousStatus, and updatedApplication.getStatus(), logging the application
+identifier along with its status transition from previousStatus to the new
+status, for audit purposes.
+
+The final statement returns decisionResponse, returning the populated decision
+response object (containing the application identifier, previous status, new
+status, and decision timestamp) to the caller, signifying to the caller (the
+controller) the outcome of recording this decision.
+
+## Supporting Elements in This Chunk
+
+The method cancelApplication is not reached from the recordDecision primary
+flow and is narrated here as a supporting element.
+
+The method cancelApplication is declared as public, returns a
+LoanApplicationResponse, and takes one parameter, applicationId, of type Long,
+representing the identifier of the loan application to cancel. Notably, this
+method is not annotated with @Transactional, despite performing a save
+operation â this is an absence of transaction management for this particular
+write operation, in contrast to recordDecision and createApplication which are
+both transactional.
+
+The first statement declares a local variable named loanApplication of type
+LoanApplication, assigned the result of
+loanApplicationRepository.findById(applicationId).orElseThrow(() -> new
+LoanApplicationNotFoundException("Loan application not found for id: " +
+applicationId)). This is a repository data access call: findById is invoked
+with applicationId as its parameter, returning an Optional<LoanApplication>
+â populated if a matching entity exists, empty otherwise. If empty,
+orElseThrow immediately constructs and throws a new
+LoanApplicationNotFoundException, with its message formed by concatenating the
+literal "Loan application not found for id: " with the value of applicationId;
+this terminates cancelApplication and the caller receives an error indicating
+the application was not found. If populated, the contained LoanApplication is
+unwrapped and assigned to loanApplication, and execution continues.
+
+The next statement is an if statement checking whether
+"APPROVED".equals(loanApplication.getStatus()) is true â that is, whether
+the loan application's current status is exactly equal to the literal string
+"APPROVED". If this condition is true â meaning the application has already
+been approved â the method immediately constructs and throws a new
+InvalidLoanStateException, passing the literal string "Cannot cancel an
+application that has already been approved" as the exception's message. This
+throw terminates cancelApplication; the caller receives an error indicating
+the application cannot be cancelled because it is already approved. If the
+condition is false â meaning the application's status is anything other than
+"APPROVED" â execution continues to the next statement.
+
+The next statement calls loanApplication.setStatus("CANCELLED"), setting the
+application's status field to the literal string "CANCELLED".
+
+The next statement declares a local variable named savedApplication of type
+LoanApplication, assigned the result of
+loanApplicationRepository.save(loanApplication). This is a repository data
+access call: save is invoked with the modified loanApplication entity (with
+its status now "CANCELLED") as its parameter, persisting this change to the
+database and returning the persisted entity as savedApplication.
+
+The next statement calls logger.info with the format string "Application id={}
+cancelled by request" and the argument applicationId, logging that this
+application was cancelled, for audit purposes.
+
+The final statement returns
+loanApplicationMapper.toResponse(savedApplication). This is an internal call
+to the loanApplicationMapper dependency's toResponse method, passing the
+persisted savedApplication entity; control transfers out to this mapping
+operation (defined in a different component, not narrated here per the cross-
+chunk rule), and its result â a LoanApplicationResponse representation of
+the now-cancelled application â returns to this point and is immediately
+returned as cancelApplication's result, signifying to the caller the details
+of the now-cancelled application, including its updated status.
+
+No finally block is present in either method of this chunk. No logging occurs
+in cancelApplication prior to the terminal-status check or the not-found check
+â only after the cancellation succeeds.

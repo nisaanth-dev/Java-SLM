@@ -1,0 +1,80 @@
+CHUNK_ID: C017
+
+APPLICATION: Claim Adjudication System
+
+SERVICE: claims-ingestion-service
+
+FILE: f17 (com.acme.insurance.claims.service.impl.ClaimRoutingServiceImpl)
+
+LAYER: Service
+
+ENTRY_POINT: no
+
+=== CODE ===
+
+package com.acme.insurance.claims.service.impl;
+
+import com.acme.insurance.claims.dto.ClaimResponse;
+import com.acme.insurance.claims.entity.ClaimRecord;
+import com.acme.insurance.claims.repository.ClaimRepository;
+import com.acme.insurance.claims.service.ClaimRoutingService;
+import com.acme.insurance.claims.service.PaymentService;
+import com.acme.insurance.claims.exception.ClaimSystemException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Implements administrative routing functions, including forcing approval or rejection.
+ */
+@Service
+public class ClaimRoutingServiceImpl implements ClaimRoutingService {
+
+    private final ClaimRepository claimRepository;
+    private final PaymentService paymentService;
+
+    public ClaimRoutingServiceImpl(ClaimRepository claimRepository, PaymentService paymentService) {
+        this.claimRepository = claimRepository;
+        this.paymentService = paymentService;
+    }
+
+    @Override
+    @Transactional
+    public ClaimResponse forceApprove(String claimId) {
+        ClaimRecord record = claimRepository.findById(claimId)
+                .orElseThrow(() -> new ClaimSystemException("E_NF_001", "Claim not found: " + claimId));
+
+        if (record.isTerminalState()) {
+            throw new ClaimSystemException("E_STATE_001", "Cannot approve a claim already in a terminal state");
+        }
+
+        record.setStatus("APPROVED");
+        claimRepository.save(record);
+
+        paymentService.initiatePayment(record.getClaimId(), record.getClaimAmount());
+
+        ClaimResponse response = new ClaimResponse();
+        response.setClaimId(record.getClaimId());
+        response.setClaimStatus(record.getStatus());
+        return response;
+    }
+
+    @Override
+    @Transactional
+    public ClaimResponse forceReject(String claimId, String reason) {
+        ClaimRecord record = claimRepository.findById(claimId)
+                .orElseThrow(() -> new ClaimSystemException("E_NF_001", "Claim not found: " + claimId));
+
+        if (record.isTerminalState()) {
+            throw new ClaimSystemException("E_STATE_001", "Cannot reject a claim already in a terminal state");
+        }
+
+        record.setStatus("DENIED");
+        claimRepository.save(record);
+
+        ClaimResponse response = new ClaimResponse();
+        response.setClaimId(record.getClaimId());
+        response.setClaimStatus(record.getStatus());
+        response.setErrorMessage("Manually rejected: " + reason);
+        return response;
+    }
+}
