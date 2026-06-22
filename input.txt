@@ -1,0 +1,95 @@
+CHUNK_ID: C001
+
+APPLICATION: Meridian Loan Origination Platform
+
+SERVICE: loan-origination-service
+
+FILE: f01 (com.meridianbank.loanorigination.controller.LoanApplicationController)
+
+LAYER: Controller
+
+ENTRY_POINT: yes
+
+=== CODE ===
+
+package com.meridianbank.loanorigination.controller;
+
+import com.meridianbank.loanorigination.dto.LoanApplicationRequest;
+import com.meridianbank.loanorigination.dto.LoanApplicationResponse;
+import com.meridianbank.loanorigination.dto.LoanDecisionResponse;
+import com.meridianbank.loanorigination.exception.LoanApplicationNotFoundException;
+import com.meridianbank.loanorigination.exception.InvalidLoanStateException;
+import com.meridianbank.loanorigination.service.LoanApplicationService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/v1/loan-applications")
+@RequiredArgsConstructor
+public class LoanApplicationController {
+
+    private static final Logger logger = LoggerFactory.getLogger(LoanApplicationController.class);
+
+    private final LoanApplicationService loanApplicationService;
+
+    @PostMapping
+    public ResponseEntity<LoanApplicationResponse> submitApplication(@Valid @RequestBody LoanApplicationRequest request) {
+        logger.info("Received loan application submission for applicantId={}", request.getApplicantId());
+
+        if (request.getRequestedAmount() == null || request.getRequestedAmount().signum() <= 0) {
+            throw new InvalidLoanStateException("Requested amount must be a positive value");
+        }
+
+        LoanApplicationResponse response = loanApplicationService.createApplication(request);
+
+        if ("REJECTED".equals(response.getStatus())) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(response);
+        }
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @GetMapping("/{applicationId}")
+    public ResponseEntity<LoanApplicationResponse> getApplication(@PathVariable Long applicationId) {
+        logger.debug("Fetching loan application with id={}", applicationId);
+
+        LoanApplicationResponse response = loanApplicationService.getApplicationById(applicationId);
+
+        if (response == null) {
+            throw new LoanApplicationNotFoundException("Loan application not found for id: " + applicationId);
+        }
+
+        return ResponseEntity.ok(response);
+    }
+
+    @PutMapping("/{applicationId}/decision")
+    public ResponseEntity<LoanDecisionResponse> decideApplication(@PathVariable Long applicationId,
+                                                                    @RequestParam String decisionOutcome) {
+        logger.info("Processing decision for applicationId={} with outcome={}", applicationId, decisionOutcome);
+
+        if (!decisionOutcome.equalsIgnoreCase("APPROVED") && !decisionOutcome.equalsIgnoreCase("REJECTED")
+                && !decisionOutcome.equalsIgnoreCase("MANUAL_REVIEW")) {
+            throw new InvalidLoanStateException("Unsupported decision outcome: " + decisionOutcome);
+        }
+
+        LoanDecisionResponse decisionResponse = loanApplicationService.recordDecision(applicationId, decisionOutcome.toUpperCase());
+
+        return ResponseEntity.ok(decisionResponse);
+    }
+
+    @GetMapping
+    public ResponseEntity<List<LoanApplicationResponse>> listApplicationsByStatus(@RequestParam(required = false) String status) {
+        logger.debug("Listing loan applications with statusFilter={}", status);
+
+        List<LoanApplicationResponse> applications = loanApplicationService.findApplicationsByStatus(status);
+
+        return ResponseEntity.ok(applications);
+    }
+}
