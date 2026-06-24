@@ -1,0 +1,81 @@
+CHUNK_ID: C060
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f60 (com.aegisinsure.underwriting.util.MoneyUtils)
+LAYER: Util
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.util;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+
+/**
+ * Stateless helpers for monetary arithmetic. All amounts are rounded to two
+ * decimal places using banker's-safe half-up rounding to keep premium and
+ * installment figures consistent across the rating and issuance flows.
+ */
+public final class MoneyUtils {
+
+    private static final int MONEY_SCALE = 2;
+    private static final RoundingMode ROUNDING = RoundingMode.HALF_UP;
+
+    private MoneyUtils() {
+        // Utility class; not instantiable.
+    }
+
+    /**
+     * Returns zero when the supplied amount is null, otherwise the amount
+     * unchanged. Used as a defensive guard before arithmetic.
+     */
+    public static BigDecimal safe(BigDecimal amount) {
+        return amount == null ? BigDecimal.ZERO : amount;
+    }
+
+    /**
+     * Rounds an amount to two decimal places. Null is treated as zero.
+     */
+    public static BigDecimal round(BigDecimal amount) {
+        return safe(amount).setScale(MONEY_SCALE, ROUNDING);
+    }
+
+    /**
+     * Multiplies a base amount by a multiplicative factor and rounds the result.
+     */
+    public static BigDecimal applyFactor(BigDecimal base, BigDecimal factor) {
+        if (base == null || factor == null) {
+            return BigDecimal.ZERO.setScale(MONEY_SCALE, ROUNDING);
+        }
+        return round(base.multiply(factor));
+    }
+
+    /**
+     * Computes {@code base * rate} as a charge (e.g., a tax line) and rounds it.
+     */
+    public static BigDecimal charge(BigDecimal base, BigDecimal rate) {
+        return applyFactor(base, rate);
+    }
+
+    /**
+     * Divides a total into {@code count} equal installments, rounding each
+     * installment to two decimals. Returns the total itself when count is one
+     * or less, and zero when the total is null.
+     */
+    public static BigDecimal perInstallment(BigDecimal total, int count) {
+        if (total == null) {
+            return BigDecimal.ZERO.setScale(MONEY_SCALE, ROUNDING);
+        }
+        if (count <= 1) {
+            return round(total);
+        }
+        return total.divide(BigDecimal.valueOf(count), MONEY_SCALE, ROUNDING);
+    }
+
+    /**
+     * Returns the larger of two amounts, treating null as zero.
+     */
+    public static BigDecimal max(BigDecimal first, BigDecimal second) {
+        return safe(first).compareTo(safe(second)) >= 0 ? safe(first) : safe(second);
+    }
+}

@@ -1,0 +1,35 @@
+CHUNK_ID: C035
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f35 (com.aegisinsure.underwriting.exception.ApplicationNotFoundException)
+LAYER: ExceptionHandler
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.exception;
+
+/**
+ * Thrown when a policy application cannot be located by its identifier or
+ * business reference. Mapped to HTTP 404 by the global exception handler.
+ */
+public class ApplicationNotFoundException extends RuntimeException {
+
+    public ApplicationNotFoundException(String message) {
+        super(message);
+    }
+
+    /**
+     * Factory for the common lookup-by-id failure case.
+     */
+    public static ApplicationNotFoundException forId(Long id) {
+        return new ApplicationNotFoundException("Policy application not found for id " + id);
+    }
+
+    /**
+     * Factory for the lookup-by-reference failure case.
+     */
+    public static ApplicationNotFoundException forReference(String reference) {
+        return new ApplicationNotFoundException(
+                "Policy application not found for reference " + reference);
+    }
+}

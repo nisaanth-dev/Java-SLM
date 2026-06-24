@@ -1,0 +1,176 @@
+CHUNK_ID: C053
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f53 (com.aegisinsure.underwriting.service.PolicyIssuanceService)
+LAYER: Service
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.service;
+
+import com.aegisinsure.underwriting.dto.response.PolicyResponse;
+import com.aegisinsure.underwriting.entity.ApplicationStatus;
+import com.aegisinsure.underwriting.entity.Policy;
+import com.aegisinsure.underwriting.entity.PolicyApplication;
+import com.aegisinsure.underwriting.entity.PolicyStatus;
+import com.aegisinsure.underwriting.entity.Quote;
+import com.aegisinsure.underwriting.entity.QuoteStatus;
+import com.aegisinsure.underwriting.exception.PolicyNotFoundException;
+import com.aegisinsure.underwriting.exception.QuoteNotFoundException;
+import com.aegisinsure.underwriting.event.publisher.PolicyEventPublisher;
+import com.aegisinsure.underwriting.mapper.PolicyMapper;
+import com.aegisinsure.underwriting.repository.PolicyApplicationRepository;
+import com.aegisinsure.underwriting.repository.PolicyRepository;
+import com.aegisinsure.underwriting.repository.QuoteRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.Locale;
+import java.util.UUID;
+
+/**
+ * Policy issuance and lifecycle service. Binds an accepted quote into a pending
+ * policy (advancing the originating application to BOUND), activates a pending
+ * policy once payment is confirmed, and cancels an in-force policy. Every
+ * lifecycle transition is broadcast to the policy lifecycle topic.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class PolicyIssuanceService {
+
+    private static final String POLICY_PREFIX = "POL";
+    private static final int POLICY_TERM_YEARS = 1;
+
+    private final PolicyRepository policyRepository;
+    private final QuoteRepository quoteRepository;
+    private final PolicyApplicationRepository applicationRepository;
+    private final PolicyEventPublisher policyEventPublisher;
+    private final PolicyMapper policyMapper;
+
+    /**
+     * Binds an accepted quote into a new pending policy. Copies the premium and
+     * installment plan from the quote, derives the policy term from the
+     * application's effective date, advances the application to BOUND, and emits
+     * a policy-issued event.
+     *
+     * @throws QuoteNotFoundException if the quote reference is unknown
+     * @throws IllegalStateException  if the quote has not been accepted
+     */
+    @Transactional
+    public PolicyResponse issuePolicy(String quoteReference) {
+        Quote quote = quoteRepository.findByQuoteReference(quoteReference)
+                .orElseThrow(() -> QuoteNotFoundException.forReference(quoteReference));
+
+        // A policy can be bound only from an accepted quote.
+        if (quote.getStatus() != QuoteStatus.ACCEPTED) {
+            throw new IllegalStateException("Quote " + quoteReference
+                    + " must be ACCEPTED to bind a policy; current status is " + quote.getStatus());
+        }
+
+        PolicyApplication application = quote.getApplication();
+        if (application == null) {
+            throw new IllegalStateException("Quote " + quoteReference + " has no parent application");
+        }
+
+        // Derive the policy term: effective date from the application, expiring
+        // one year later. Fall back to today when no effective date was set.
+        LocalDate effectiveDate = application.getEffectiveDate() == null
+                ? LocalDate.now() : application.getEffectiveDate();
+        LocalDate expirationDate = effectiveDate.plusYears(POLICY_TERM_YEARS);
+
+        Policy policy = Policy.builder()
+                .policyNumber(newPolicyNumber())
+                .application(application)
+                .sourceQuoteReference(quote.getQuoteReference())
+                .status(PolicyStatus.PENDING)
+                .effectiveDate(effectiveDate)
+                .expirationDate(expirationDate)
+                .annualPremium(quote.getAnnualPremium())
+                .totalPayable(quote.getTotalPayable())
+                .installmentCount(quote.getInstallmentCount())
+                .installmentAmount(quote.getInstallmentAmount())
+                .issuedAt(Instant.now())
+                .build();
+
+        // Advance the application to its bound terminal state.
+        if (application.getStatus().canTransitionTo(ApplicationStatus.BOUND)) {
+            application.transitionTo(ApplicationStatus.BOUND);
+            applicationRepository.save(application);
+        } else {
+            log.warn("Application {} in state {} could not be marked BOUND at issuance",
+                    application.getApplicationReference(), application.getStatus());
+        }
+
+        Policy saved = policyRepository.save(policy);
+        policyEventPublisher.publishPolicyEvent(saved, "POLICY_ISSUED");
+        log.info("Issued policy {} from quote {} (effective {} - {})",
+                saved.getPolicyNumber(), quoteReference, effectiveDate, expirationDate);
+
+        return policyMapper.toResponse(saved);
+    }
+
+    /**
+     * Activates a pending policy once a premium payment is confirmed. Invoked
+     * asynchronously by the payment event listener. Idempotent: a policy that is
+     * already active (or no longer pending) is left untouched.
+     *
+     * @throws PolicyNotFoundException if the policy number is unknown
+     */
+    @Transactional
+    public void activatePolicyForPayment(String policyNumber) {
+        Policy policy = policyRepository.findByPolicyNumber(policyNumber)
+                .orElseThrow(() -> PolicyNotFoundException.forNumber(policyNumber));
+
+        // Only a pending policy transitions to active on payment; ignore repeats.
+        if (policy.getStatus() == PolicyStatus.PENDING) {
+            policy.transitionTo(PolicyStatus.ACTIVE);
+            Policy saved = policyRepository.save(policy);
+            policyEventPublisher.publishPolicyEvent(saved, "POLICY_ACTIVATED");
+            log.info("Activated policy {} on confirmed payment", saved.getPolicyNumber());
+        } else {
+            log.debug("Ignoring payment activation for policy {} in state {}",
+                    policyNumber, policy.getStatus());
+        }
+    }
+
+    /**
+     * Retrieves a policy by its policy number.
+     */
+    @Transactional(readOnly = true)
+    public PolicyResponse getByPolicyNumber(String policyNumber) {
+        Policy policy = policyRepository.findByPolicyNumber(policyNumber)
+                .orElseThrow(() -> PolicyNotFoundException.forNumber(policyNumber));
+        return policyMapper.toResponse(policy);
+    }
+
+    /**
+     * Cancels a policy, recording the reason and emitting a cancellation event.
+     *
+     * @throws PolicyNotFoundException if the policy number is unknown
+     */
+    @Transactional
+    public PolicyResponse cancelPolicy(String policyNumber, String reason) {
+        Policy policy = policyRepository.findByPolicyNumber(policyNumber)
+                .orElseThrow(() -> PolicyNotFoundException.forNumber(policyNumber));
+
+        policy.cancel(reason);
+        Policy saved = policyRepository.save(policy);
+        policyEventPublisher.publishPolicyEvent(saved, "POLICY_CANCELLED");
+        log.info("Cancelled policy {}: {}", saved.getPolicyNumber(), reason);
+
+        return policyMapper.toResponse(saved);
+    }
+
+    /**
+     * Generates a unique, human-traceable policy number.
+     */
+    private String newPolicyNumber() {
+        String token = UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
+        return POLICY_PREFIX + "-" + token;
+    }
+}

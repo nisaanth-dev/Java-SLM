@@ -1,0 +1,85 @@
+CHUNK_ID: C043
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f43 (com.aegisinsure.underwriting.mapper.PolicyMapper)
+LAYER: Mapper
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.mapper;
+
+import com.aegisinsure.underwriting.dto.response.PolicyResponse;
+import com.aegisinsure.underwriting.entity.Policy;
+import com.aegisinsure.underwriting.entity.PolicyApplication;
+import org.mapstruct.Mapper;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * MapStruct mapper that assembles the policy read model, expanding the stored
+ * installment plan into a concrete dated schedule. The schedule generation is a
+ * default method because it derives due dates and absorbs rounding into the
+ * final installment.
+ */
+@Mapper(componentModel = "spring")
+public interface PolicyMapper {
+
+    /**
+     * Assembles a {@link PolicyResponse}, generating the monthly installment
+     * schedule from the bound installment count and amount.
+     */
+    default PolicyResponse toResponse(Policy policy) {
+        if (policy == null) {
+            return null;
+        }
+
+        PolicyApplication application = policy.getApplication();
+        String applicationReference = application == null
+                ? null : application.getApplicationReference();
+
+        List<PolicyResponse.InstallmentView> installments =
+                buildSchedule(policy.getInstallmentCount(), policy.getInstallmentAmount(),
+                        policy.getTotalPayable(), policy.getEffectiveDate());
+
+        return new PolicyResponse(
+                policy.getId(), policy.getPolicyNumber(), applicationReference,
+                policy.getSourceQuoteReference(), policy.getStatus(),
+                policy.getEffectiveDate(), policy.getExpirationDate(),
+                policy.getAnnualPremium(), policy.getTotalPayable(),
+                policy.getInstallmentCount(), policy.getInstallmentAmount(),
+                policy.getIssuedAt(), installments);
+    }
+
+    /**
+     * Generates a monthly installment schedule. Each installment falls on the
+     * same day-of-month as the effective date; the final installment absorbs
+     * any rounding remainder so the sum equals the total payable.
+     */
+    default List<PolicyResponse.InstallmentView> buildSchedule(
+            int count, BigDecimal installmentAmount, BigDecimal totalPayable, LocalDate effectiveDate) {
+
+        List<PolicyResponse.InstallmentView> schedule = new ArrayList<>();
+        if (count <= 0 || installmentAmount == null || effectiveDate == null) {
+            return schedule;
+        }
+
+        BigDecimal runningTotal = BigDecimal.ZERO;
+        for (int sequence = 1; sequence <= count; sequence++) {
+            LocalDate dueDate = effectiveDate.plusMonths(sequence - 1L);
+            BigDecimal amount;
+            if (sequence < count) {
+                amount = installmentAmount;
+                runningTotal = runningTotal.add(installmentAmount);
+            } else {
+                // Final installment reconciles any rounding drift against the total.
+                BigDecimal total = totalPayable == null ? installmentAmount : totalPayable;
+                amount = total.subtract(runningTotal);
+            }
+            schedule.add(new PolicyResponse.InstallmentView(sequence, dueDate, amount));
+        }
+        return schedule;
+    }
+}

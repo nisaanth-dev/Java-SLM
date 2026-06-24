@@ -1,0 +1,29 @@
+CHUNK_ID: C038
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f38 (com.aegisinsure.underwriting.exception.InvalidStateTransitionException)
+LAYER: ExceptionHandler
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.exception;
+
+/**
+ * Thrown when a caller attempts to move an application, quote, or policy along
+ * an illegal edge of its state machine (for example, binding a quote that has
+ * already expired). Mapped to HTTP 409 Conflict by the global handler.
+ */
+public class InvalidStateTransitionException extends RuntimeException {
+
+    public InvalidStateTransitionException(String message) {
+        super(message);
+    }
+
+    /**
+     * Builds a uniformly-formatted message describing the rejected transition.
+     */
+    public static InvalidStateTransitionException of(String entity, Object from, Object to) {
+        return new InvalidStateTransitionException(
+                "Illegal " + entity + " transition: " + from + " -> " + to);
+    }
+}

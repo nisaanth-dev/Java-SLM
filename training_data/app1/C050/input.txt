@@ -1,0 +1,36 @@
+CHUNK_ID: C050
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f50 (com.aegisinsure.underwriting.service.CreditBureauClient)
+LAYER: Service
+ENTRY_POINT: yes
+
+=== CODE ===
+package com.aegisinsure.underwriting.service;
+
+import com.aegisinsure.underwriting.dto.response.CreditReportResult;
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
+
+/**
+ * Declarative HTTP client for the external credit-bureau-service. Pulls a
+ * credit report for an applicant keyed by license number and issuing state.
+ * The base URL is resolved from the {@code underwriting.external.credit-bureau-url}
+ * property.
+ */
+@FeignClient(name = "credit-bureau-service", url = "${underwriting.external.credit-bureau-url}")
+public interface CreditBureauClient {
+
+    /**
+     * Retrieves a credit report for the identified applicant.
+     *
+     * @param licenseNumber the applicant's driver license number
+     * @param state         the two-letter issuing state code
+     * @return the bureau credit report result
+     */
+    @GetMapping("/api/v1/credit-reports/{licenseNumber}")
+    CreditReportResult fetchCreditReport(@PathVariable("licenseNumber") String licenseNumber,
+                                         @RequestParam("state") String state);
+}

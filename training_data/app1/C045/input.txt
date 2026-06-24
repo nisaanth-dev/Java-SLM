@@ -1,0 +1,49 @@
+CHUNK_ID: C045
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f45 (com.aegisinsure.underwriting.repository.ApplicantRepository)
+LAYER: Repository
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.repository;
+
+import com.aegisinsure.underwriting.entity.Applicant;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Data-access repository for {@link Applicant} party records.
+ */
+@Repository
+public interface ApplicantRepository extends JpaRepository<Applicant, Long> {
+
+    /**
+     * Locates an applicant by the natural key of license number plus issuing
+     * state, used to deduplicate parties across applications.
+     */
+    Optional<Applicant> findByLicenseNumberAndLicenseState(String licenseNumber, String licenseState);
+
+    /**
+     * Finds an applicant by email address.
+     */
+    Optional<Applicant> findByEmailIgnoreCase(String email);
+
+    /**
+     * Returns true when an applicant already exists for the supplied license
+     * number, regardless of state.
+     */
+    boolean existsByLicenseNumber(String licenseNumber);
+
+    /**
+     * Case-insensitive surname search ordered by last then first name.
+     */
+    @Query("select a from Applicant a where lower(a.lastName) = lower(:lastName) "
+            + "order by a.lastName asc, a.firstName asc")
+    List<Applicant> findByLastNameIgnoreCase(@Param("lastName") String lastName);
+}

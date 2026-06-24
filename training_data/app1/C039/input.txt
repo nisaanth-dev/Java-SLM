@@ -1,0 +1,28 @@
+CHUNK_ID: C039
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f39 (com.aegisinsure.underwriting.exception.PolicyNotFoundException)
+LAYER: ExceptionHandler
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.exception;
+
+/**
+ * Thrown when an issued policy cannot be located by its identifier or policy
+ * number. Mapped to HTTP 404 by the global exception handler.
+ */
+public class PolicyNotFoundException extends RuntimeException {
+
+    public PolicyNotFoundException(String message) {
+        super(message);
+    }
+
+    public static PolicyNotFoundException forId(Long id) {
+        return new PolicyNotFoundException("Policy not found for id " + id);
+    }
+
+    public static PolicyNotFoundException forNumber(String policyNumber) {
+        return new PolicyNotFoundException("Policy not found for number " + policyNumber);
+    }
+}

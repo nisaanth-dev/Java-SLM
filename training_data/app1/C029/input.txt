@@ -1,0 +1,67 @@
+CHUNK_ID: C029
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f29 (com.aegisinsure.underwriting.event.listener.PaymentEventListener)
+LAYER: EventListener
+ENTRY_POINT: yes
+
+=== CODE ===
+package com.aegisinsure.underwriting.event.listener;
+
+import com.aegisinsure.underwriting.config.KafkaConfig;
+import com.aegisinsure.underwriting.event.PaymentConfirmedEvent;
+import com.aegisinsure.underwriting.exception.PolicyNotFoundException;
+import com.aegisinsure.underwriting.service.PolicyIssuanceService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.stereotype.Component;
+
+/**
+ * Consumes confirmed-payment events from the billing domain and activates the
+ * corresponding pending policy. Uses manual acknowledgement so a transient
+ * failure leaves the offset uncommitted for redelivery, while an unrecoverable
+ * condition (an unknown policy) is acknowledged and skipped to avoid a poison
+ * loop.
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class PaymentEventListener {
+
+    private final PolicyIssuanceService policyIssuanceService;
+
+    /**
+     * Handles a single confirmed-payment event. Activates the referenced policy
+     * and commits the offset; missing policies are skipped, transient faults are
+     * left for redelivery.
+     */
+    @KafkaListener(
+            topics = KafkaConfig.PAYMENT_CONFIRMED_TOPIC,
+            containerFactory = "kafkaListenerContainerFactory")
+    public void onPaymentConfirmed(PaymentConfirmedEvent event, Acknowledgment ack) {
+        // Guard against malformed envelopes; nothing actionable, so commit.
+        if (event == null || event.policyNumber() == null) {
+            log.warn("Discarding payment event with no policy number");
+            ack.acknowledge();
+            return;
+        }
+
+        try {
+            policyIssuanceService.activatePolicyForPayment(event.policyNumber());
+            ack.acknowledge();
+            log.debug("Processed payment {} for policy {}",
+                    event.paymentId(), event.policyNumber());
+        } catch (PolicyNotFoundException notFound) {
+            // The policy does not exist; redelivery cannot help, so skip it.
+            log.warn("Payment {} references unknown policy {}; skipping",
+                    event.paymentId(), event.policyNumber());
+            ack.acknowledge();
+        } catch (RuntimeException ex) {
+            // Transient failure: leave the offset uncommitted for redelivery.
+            log.error("Failed to process payment {} for policy {}: {}",
+                    event.paymentId(), event.policyNumber(), ex.getMessage());
+        }
+    }
+}

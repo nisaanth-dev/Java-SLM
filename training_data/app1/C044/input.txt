@@ -1,0 +1,61 @@
+CHUNK_ID: C044
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f44 (com.aegisinsure.underwriting.mapper.QuoteMapper)
+LAYER: Mapper
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.mapper;
+
+import com.aegisinsure.underwriting.dto.response.QuoteResponse;
+import com.aegisinsure.underwriting.entity.CoverageItem;
+import com.aegisinsure.underwriting.entity.PolicyApplication;
+import com.aegisinsure.underwriting.entity.Quote;
+import org.mapstruct.Mapper;
+
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * MapStruct mapper that assembles the quote read model. The per-coverage
+ * premium breakdown is derived from the originating application's coverage
+ * lines, so the projection is implemented as a default method.
+ */
+@Mapper(componentModel = "spring")
+public interface QuoteMapper {
+
+    /**
+     * Assembles a {@link QuoteResponse}, including the per-coverage premium
+     * breakdown taken from the parent application's calculated coverage lines.
+     */
+    default QuoteResponse toResponse(Quote quote) {
+        if (quote == null) {
+            return null;
+        }
+
+        PolicyApplication application = quote.getApplication();
+        String applicationReference = application == null
+                ? null : application.getApplicationReference();
+
+        // Build the premium breakdown from each rated coverage line.
+        List<QuoteResponse.PremiumLineView> premiumLines = new ArrayList<>();
+        if (application != null && application.getCoverageItems() != null) {
+            for (CoverageItem item : application.getCoverageItems()) {
+                BigDecimal premium = item.getCalculatedPremium() == null
+                        ? BigDecimal.ZERO : item.getCalculatedPremium();
+                String typeName = item.getCoverageType() == null
+                        ? null : item.getCoverageType().name();
+                premiumLines.add(new QuoteResponse.PremiumLineView(typeName, premium));
+            }
+        }
+
+        return new QuoteResponse(
+                quote.getId(), quote.getQuoteReference(), applicationReference,
+                quote.getStatus(), quote.getAnnualPremium(), quote.getFees(),
+                quote.getTaxes(), quote.getTotalPayable(), quote.getInstallmentCount(),
+                quote.getInstallmentAmount(), quote.getIssuedAt(), quote.getExpiresAt(),
+                premiumLines);
+    }
+}

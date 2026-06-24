@@ -1,0 +1,71 @@
+CHUNK_ID: C014
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f14 (com.aegisinsure.underwriting.dto.response.PolicyApplicationResponse)
+LAYER: DTO
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.dto.response;
+
+import com.aegisinsure.underwriting.entity.ApplicationStatus;
+import com.aegisinsure.underwriting.entity.RiskTier;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+
+/**
+ * Read model returned for an auto policy application. Flattens the applicant's
+ * display name and exposes the underwriting outcome together with nested views
+ * of the insured vehicles and the requested coverage lines.
+ */
+public record PolicyApplicationResponse(
+        Long id,
+        String applicationReference,
+        ApplicationStatus status,
+        String applicantName,
+        LocalDate effectiveDate,
+        Integer creditScore,
+        Integer fraudScore,
+        Integer riskScore,
+        RiskTier riskTier,
+        String decisionReason,
+        List<VehicleView> vehicles,
+        List<CoverageView> coverages,
+        Instant submittedAt,
+        Instant createdAt,
+        Instant updatedAt
+) {
+
+    /**
+     * Nested projection of an insured vehicle as exposed on the application
+     * read model.
+     */
+    public record VehicleView(
+            Long id,
+            String vin,
+            String make,
+            String model,
+            int modelYear,
+            BigDecimal statedValue,
+            int annualMileage,
+            String primaryUse,
+            boolean antiTheftDevice
+    ) {
+    }
+
+    /**
+     * Nested projection of a requested coverage line including the premium that
+     * was calculated for it during rating.
+     */
+    public record CoverageView(
+            Long id,
+            String coverageType,
+            BigDecimal coverageLimit,
+            BigDecimal deductible,
+            BigDecimal calculatedPremium
+    ) {
+    }
+}

@@ -1,0 +1,190 @@
+CHUNK_ID: C022
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f22 (com.aegisinsure.underwriting.entity.PolicyApplication)
+LAYER: Entity
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.entity;
+
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
+import jakarta.persistence.Version;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Aggregate root for an auto insurance application. Carries the applicant, the
+ * insured vehicles, the requested coverages, and the underwriting outcome
+ * (credit, fraud, and composite risk scores plus the assigned tier and
+ * decision metadata). Quotes generated from an approved application are tracked
+ * in the {@code quotes} collection.
+ */
+@Entity
+@Table(name = "policy_application")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class PolicyApplication {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "application_reference", nullable = false, unique = true, length = 40)
+    private String applicationReference;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "applicant_id", nullable = false)
+    private Applicant applicant;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private ApplicationStatus status;
+
+    @Column(name = "effective_date")
+    private LocalDate effectiveDate;
+
+    @OneToMany(mappedBy = "application", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<Vehicle> vehicles = new ArrayList<>();
+
+    @OneToMany(mappedBy = "application", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<CoverageItem> coverageItems = new ArrayList<>();
+
+    @OneToMany(mappedBy = "application", cascade = CascadeType.ALL, orphanRemoval = false)
+    @Builder.Default
+    private List<Quote> quotes = new ArrayList<>();
+
+    @Column(name = "credit_score")
+    private Integer creditScore;
+
+    @Column(name = "fraud_score")
+    private Integer fraudScore;
+
+    @Column(name = "risk_score")
+    private Integer riskScore;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "risk_tier", length = 20)
+    private RiskTier riskTier;
+
+    @Column(name = "decision_reason", length = 500)
+    private String decisionReason;
+
+    @Column(name = "decisioned_by", length = 80)
+    private String decisionedBy;
+
+    @Column(name = "decisioned_at")
+    private Instant decisionedAt;
+
+    @Column(name = "submitted_at")
+    private Instant submittedAt;
+
+    @Version
+    @Column(name = "version")
+    private Long version;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
+    /**
+     * Adds an insured vehicle and maintains the back-reference.
+     */
+    public void addVehicle(Vehicle vehicle) {
+        if (vehicle == null) {
+            return;
+        }
+        vehicles.add(vehicle);
+        vehicle.setApplication(this);
+    }
+
+    /**
+     * Adds a requested coverage line and maintains the back-reference.
+     */
+    public void addCoverageItem(CoverageItem item) {
+        if (item == null) {
+            return;
+        }
+        coverageItems.add(item);
+        item.setApplication(this);
+    }
+
+    /**
+     * Registers a quote produced from this application.
+     */
+    public void addQuote(Quote quote) {
+        if (quote == null) {
+            return;
+        }
+        quotes.add(quote);
+        quote.setApplication(this);
+    }
+
+    /**
+     * Applies a validated status transition. The caller (service layer) is
+     * responsible for verifying legality via
+     * {@link ApplicationStatus#canTransitionTo(ApplicationStatus)} before
+     * invoking this method; the guard here is a final defensive check.
+     */
+    public void transitionTo(ApplicationStatus target) {
+        if (this.status != null && !this.status.canTransitionTo(target)) {
+            throw new IllegalStateException(
+                    "Illegal application status transition: " + this.status + " -> " + target);
+        }
+        this.status = target;
+    }
+
+    /**
+     * Records a binding underwriting decision on the application.
+     */
+    public void recordDecision(ApplicationStatus outcome, String reason, String decisionedBy) {
+        transitionTo(outcome);
+        this.decisionReason = reason;
+        this.decisionedBy = decisionedBy;
+        this.decisionedAt = Instant.now();
+    }
+
+    @PrePersist
+    void onCreate() {
+        Instant now = Instant.now();
+        this.createdAt = now;
+        this.updatedAt = now;
+        if (this.status == null) {
+            this.status = ApplicationStatus.DRAFT;
+        }
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        this.updatedAt = Instant.now();
+    }
+}

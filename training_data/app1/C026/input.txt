@@ -1,0 +1,60 @@
+CHUNK_ID: C026
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f26 (com.aegisinsure.underwriting.entity.RiskTier)
+LAYER: Entity
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.entity;
+
+import java.math.BigDecimal;
+
+/**
+ * Underwriting risk classification derived from the composite risk score.
+ * Each tier carries a premium rating factor applied during premium calculation.
+ */
+public enum RiskTier {
+
+    PREFERRED(new BigDecimal("0.85")),
+    STANDARD(new BigDecimal("1.00")),
+    SUBSTANDARD(new BigDecimal("1.50")),
+    DECLINE(new BigDecimal("0.00"));
+
+    private final BigDecimal ratingFactor;
+
+    RiskTier(BigDecimal ratingFactor) {
+        this.ratingFactor = ratingFactor;
+    }
+
+    /**
+     * The multiplicative premium factor associated with this tier. The
+     * {@link #DECLINE} tier returns zero because no premium is offered.
+     */
+    public BigDecimal getRatingFactor() {
+        return ratingFactor;
+    }
+
+    /**
+     * Maps a clamped 0-100 composite risk score onto a tier using the
+     * underwriting band thresholds.
+     */
+    public static RiskTier fromScore(int compositeScore) {
+        if (compositeScore < 30) {
+            return PREFERRED;
+        } else if (compositeScore < 55) {
+            return STANDARD;
+        } else if (compositeScore < 75) {
+            return SUBSTANDARD;
+        }
+        return DECLINE;
+    }
+
+    /**
+     * Whether this tier represents an insurable risk. A declined tier is not
+     * eligible for a quote.
+     */
+    public boolean isInsurable() {
+        return this != DECLINE;
+    }
+}

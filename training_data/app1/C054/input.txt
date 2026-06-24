@@ -1,0 +1,208 @@
+CHUNK_ID: C054
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f54 (com.aegisinsure.underwriting.service.PremiumCalculationService)
+LAYER: Service
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.service;
+
+import com.aegisinsure.underwriting.entity.Applicant;
+import com.aegisinsure.underwriting.entity.CoverageItem;
+import com.aegisinsure.underwriting.entity.PolicyApplication;
+import com.aegisinsure.underwriting.entity.RiskTier;
+import com.aegisinsure.underwriting.entity.Vehicle;
+import com.aegisinsure.underwriting.exception.ApplicationNotFoundException;
+import com.aegisinsure.underwriting.repository.PolicyApplicationRepository;
+import com.aegisinsure.underwriting.util.AgeCalculator;
+import com.aegisinsure.underwriting.util.MoneyUtils;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+
+/**
+ * Rates every coverage line on an application and persists the per-line
+ * premiums back onto the {@link CoverageItem} rows. The rating model multiplies
+ * the statutory base rate for the coverage by the risk-tier factor, a
+ * driver-experience factor, and an aggregate vehicle factor, then applies a
+ * deductible credit. Quote-level fees, taxes, and installment plans are layered
+ * on later by the quote service; this component is concerned only with the
+ * coverage-level technical premium.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class PremiumCalculationService {
+
+    // High stated value above which a vehicle attracts a physical-damage loading.
+    private static final BigDecimal HIGH_VALUE_THRESHOLD = new BigDecimal("60000");
+    // Per-dollar credit granted for carrying a deductible on a coverage line.
+    private static final BigDecimal DEDUCTIBLE_CREDIT_RATE = new BigDecimal("0.05");
+    // The deductible credit may never erode more than this fraction of premium.
+    private static final BigDecimal MAX_CREDIT_FRACTION = new BigDecimal("0.25");
+    // Floor applied to any rated coverage so a premium never drops to zero.
+    private static final BigDecimal MIN_COVERAGE_PREMIUM = new BigDecimal("25.00");
+    // Lower bound on the composite vehicle factor after all adjustments.
+    private static final BigDecimal MIN_VEHICLE_FACTOR = new BigDecimal("0.60");
+
+    private final PolicyApplicationRepository applicationRepository;
+
+    /**
+     * Loads the application, rates each coverage line, writes the calculated
+     * premium onto every {@link CoverageItem}, and persists the aggregate
+     * through the cascade on the application. Returns the managed, freshly-rated
+     * application so callers (the quote service) can read the line premiums
+     * without a second database round-trip.
+     *
+     * @throws ApplicationNotFoundException if no application exists for the id
+     * @throws IllegalStateException        if the application is not in an
+     *                                      insurable, rateable condition
+     */
+    @Transactional
+    public PolicyApplication calculateAndPersist(Long applicationId) {
+        // Load the aggregate; a missing row is a hard 404 for the caller.
+        PolicyApplication application = applicationRepository.findById(applicationId)
+                .orElseThrow(() -> ApplicationNotFoundException.forId(applicationId));
+
+        // An application can only be rated once underwriting has assigned an
+        // insurable tier; declined or unscored applications are rejected.
+        RiskTier tier = application.getRiskTier();
+        if (tier == null || !tier.isInsurable()) {
+            throw new IllegalStateException(
+                    "Cannot rate application " + application.getApplicationReference()
+                            + " without an insurable risk tier (tier=" + tier + ")");
+        }
+
+        List<CoverageItem> coverageItems = application.getCoverageItems();
+        if (coverageItems == null || coverageItems.isEmpty()) {
+            throw new IllegalStateException("Application "
+                    + application.getApplicationReference() + " has no coverage items to rate");
+        }
+
+        // Derive the two cross-coverage multipliers once per application.
+        BigDecimal tierFactor = tier.getRatingFactor();
+        BigDecimal driverFactor = driverFactor(application.getApplicant());
+        BigDecimal vehicleFactor = vehicleFactor(application.getVehicles());
+
+        // Rate each requested coverage line in turn and stamp the premium on it.
+        for (CoverageItem item : coverageItems) {
+            BigDecimal premium = rateCoverage(item, tierFactor, driverFactor, vehicleFactor);
+            item.setCalculatedPremium(premium);
+        }
+
+        log.debug("Rated {} coverage lines for application {} (tierFactor={}, driverFactor={}, vehicleFactor={})",
+                coverageItems.size(), application.getApplicationReference(),
+                tierFactor, driverFactor, vehicleFactor);
+
+        // The coverage items cascade-persist with the managed application.
+        return applicationRepository.save(application);
+    }
+
+    /**
+     * Rates a single coverage line: base rate scaled by the tier, driver, and
+     * vehicle factors, less a bounded deductible credit, floored so the line
+     * always carries a minimum premium.
+     */
+    private BigDecimal rateCoverage(CoverageItem item, BigDecimal tierFactor,
+                                    BigDecimal driverFactor, BigDecimal vehicleFactor) {
+        BigDecimal base = item.getCoverageType() == null
+                ? BigDecimal.ZERO : item.getCoverageType().getBaseAnnualRate();
+
+        // Apply the three multiplicative factors in sequence, rounding at each
+        // step to keep the running premium in clean monetary units.
+        BigDecimal rated = MoneyUtils.applyFactor(base, tierFactor);
+        rated = MoneyUtils.applyFactor(rated, driverFactor);
+        rated = MoneyUtils.applyFactor(rated, vehicleFactor);
+
+        // Carrying a deductible earns a credit, capped at a fraction of premium.
+        if (item.hasDeductible()) {
+            BigDecimal rawCredit = MoneyUtils.applyFactor(item.getDeductible(), DEDUCTIBLE_CREDIT_RATE);
+            BigDecimal creditCap = MoneyUtils.applyFactor(rated, MAX_CREDIT_FRACTION);
+            BigDecimal credit = rawCredit.min(creditCap);
+            rated = MoneyUtils.round(rated.subtract(credit));
+        }
+
+        // Never let a rated coverage fall below the per-line floor.
+        return MoneyUtils.max(rated, MIN_COVERAGE_PREMIUM);
+    }
+
+    /**
+     * Computes the driver-experience factor from the applicant's age and
+     * license tenure. Young and very old drivers, and the newly-licensed, carry
+     * loadings; the seasoned middle band is rated at parity.
+     */
+    private BigDecimal driverFactor(Applicant applicant) {
+        if (applicant == null) {
+            return BigDecimal.ONE;
+        }
+        LocalDate today = LocalDate.now();
+        BigDecimal factor;
+
+        int age = AgeCalculator.ageInYears(applicant.getDateOfBirth(), today);
+        if (age > 0 && age < 25) {
+            factor = new BigDecimal("1.60");
+        } else if (age > 70) {
+            factor = new BigDecimal("1.25");
+        } else {
+            factor = BigDecimal.ONE;
+        }
+
+        // Newly-licensed drivers attract an additional inexperience loading.
+        int yearsLicensed = AgeCalculator.yearsBetween(applicant.getLicenseIssueDate(), today);
+        if (applicant.getLicenseIssueDate() != null && yearsLicensed < 3) {
+            factor = factor.add(new BigDecimal("0.20"));
+        }
+        return factor;
+    }
+
+    /**
+     * Computes the aggregate vehicle factor across every insured vehicle. High
+     * value, heavy mileage, and commercial use each raise the factor; a fleet
+     * fully equipped with anti-theft devices and multi-vehicle households earn
+     * small credits. The result is floored so it cannot collapse to nothing.
+     */
+    private BigDecimal vehicleFactor(List<Vehicle> vehicles) {
+        if (vehicles == null || vehicles.isEmpty()) {
+            return BigDecimal.ONE;
+        }
+
+        BigDecimal factor = BigDecimal.ONE;
+        boolean everyVehicleHasAntiTheft = true;
+
+        // Accumulate per-vehicle loadings across the insured set.
+        for (Vehicle vehicle : vehicles) {
+            if (vehicle.getStatedValue() != null
+                    && vehicle.getStatedValue().compareTo(HIGH_VALUE_THRESHOLD) > 0) {
+                factor = factor.add(new BigDecimal("0.15"));
+            }
+            if (vehicle.isCommercialUse()) {
+                factor = factor.add(new BigDecimal("0.25"));
+            } else if ("COMMUTE".equalsIgnoreCase(vehicle.getPrimaryUse())) {
+                factor = factor.add(new BigDecimal("0.05"));
+            }
+            if (vehicle.getAnnualMileage() > 15000) {
+                factor = factor.add(new BigDecimal("0.10"));
+            }
+            if (!vehicle.isAntiTheftDevice()) {
+                everyVehicleHasAntiTheft = false;
+            }
+        }
+
+        // A fully-protected fleet earns a theft-mitigation credit.
+        if (everyVehicleHasAntiTheft) {
+            factor = factor.subtract(new BigDecimal("0.05"));
+        }
+        // Multi-vehicle households are statistically lower-risk per vehicle.
+        if (vehicles.size() > 1) {
+            factor = factor.subtract(new BigDecimal("0.03"));
+        }
+
+        return factor.max(MIN_VEHICLE_FACTOR);
+    }
+}

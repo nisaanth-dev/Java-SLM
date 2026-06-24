@@ -1,0 +1,29 @@
+CHUNK_ID: C013
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f13 (com.aegisinsure.underwriting.dto.response.FraudScreeningResult)
+LAYER: DTO
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.dto.response;
+
+/**
+ * Response payload returned by the external fraud-detection-service. Carries
+ * the fraud propensity score and the categorical screening flags that can
+ * force an underwriting referral or decline regardless of the numeric score.
+ *
+ * @param fraudScore       numeric fraud propensity score, 0-100
+ * @param referenceId      opaque screening reference for audit
+ * @param watchlistHit     true when the applicant matched a sanctions/watchlist
+ * @param identityMismatch true when supplied identity data failed verification
+ * @param recommendation   advisory disposition: ACCEPT, REVIEW, or REJECT
+ */
+public record FraudScreeningResult(
+        int fraudScore,
+        String referenceId,
+        boolean watchlistHit,
+        boolean identityMismatch,
+        String recommendation
+) {
+}

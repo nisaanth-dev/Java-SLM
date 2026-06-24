@@ -1,0 +1,77 @@
+CHUNK_ID: C030
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f30 (com.aegisinsure.underwriting.event.listener.VehicleInspectionEventListener)
+LAYER: EventListener
+ENTRY_POINT: yes
+
+=== CODE ===
+package com.aegisinsure.underwriting.event.listener;
+
+import com.aegisinsure.underwriting.config.KafkaConfig;
+import com.aegisinsure.underwriting.event.VehicleInspectionEvent;
+import com.aegisinsure.underwriting.service.UnderwritingService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.stereotype.Component;
+
+/**
+ * Consumes completed vehicle-inspection events. A failed inspection refers the
+ * associated application back for underwriter review; a passed inspection is
+ * recorded and requires no action. Manual acknowledgement is used so transient
+ * failures are redelivered.
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class VehicleInspectionEventListener {
+
+    private final UnderwritingService underwritingService;
+
+    /**
+     * Handles a single inspection-completed event, referring the application on
+     * failure and committing the offset on success.
+     */
+    @KafkaListener(
+            topics = KafkaConfig.VEHICLE_INSPECTION_TOPIC,
+            containerFactory = "kafkaListenerContainerFactory")
+    public void onInspectionCompleted(VehicleInspectionEvent event, Acknowledgment ack) {
+        // Guard against malformed envelopes; nothing actionable, so commit.
+        if (event == null || event.applicationReference() == null) {
+            log.warn("Discarding inspection event with no application reference");
+            ack.acknowledge();
+            return;
+        }
+
+        try {
+            if (!event.passed()) {
+                // Build a concise referral reason from the inspection detail.
+                String reason = buildFailureReason(event);
+                underwritingService.handleFailedInspection(event.applicationReference(), reason);
+                log.info("Application {} referred after failed inspection {}",
+                        event.applicationReference(), event.inspectionId());
+            } else {
+                log.debug("Inspection {} passed for application {}",
+                        event.inspectionId(), event.applicationReference());
+            }
+            ack.acknowledge();
+        } catch (RuntimeException ex) {
+            // Transient failure: leave the offset uncommitted for redelivery.
+            log.error("Failed to process inspection {} for application {}: {}",
+                    event.inspectionId(), event.applicationReference(), ex.getMessage());
+        }
+    }
+
+    /**
+     * Composes a referral reason string from the inspector notes and the
+     * reported condition score.
+     */
+    private String buildFailureReason(VehicleInspectionEvent event) {
+        String notes = (event.inspectorNotes() == null || event.inspectorNotes().isBlank())
+                ? "no notes provided" : event.inspectorNotes();
+        return "VIN " + event.vin() + " failed inspection (conditionScore="
+                + event.conditionScore() + "): " + notes;
+    }
+}

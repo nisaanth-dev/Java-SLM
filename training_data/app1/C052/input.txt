@@ -1,0 +1,211 @@
+CHUNK_ID: C052
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f52 (com.aegisinsure.underwriting.service.PolicyApplicationService)
+LAYER: Service
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.service;
+
+import com.aegisinsure.underwriting.dto.request.CoverageSelectionRequest;
+import com.aegisinsure.underwriting.dto.request.PolicyApplicationRequest;
+import com.aegisinsure.underwriting.dto.request.VehicleRequest;
+import com.aegisinsure.underwriting.dto.response.PolicyApplicationResponse;
+import com.aegisinsure.underwriting.entity.Applicant;
+import com.aegisinsure.underwriting.entity.ApplicationStatus;
+import com.aegisinsure.underwriting.entity.CoverageItem;
+import com.aegisinsure.underwriting.entity.CoverageType;
+import com.aegisinsure.underwriting.entity.PolicyApplication;
+import com.aegisinsure.underwriting.entity.Vehicle;
+import com.aegisinsure.underwriting.exception.ApplicationNotFoundException;
+import com.aegisinsure.underwriting.mapper.PolicyApplicationMapper;
+import com.aegisinsure.underwriting.repository.ApplicantRepository;
+import com.aegisinsure.underwriting.repository.PolicyApplicationRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * Application-intake service. Owns creation of new auto applications (including
+ * applicant de-duplication and mandatory-coverage validation), read access by
+ * reference, id, or status, and applicant-initiated withdrawal. Submitted
+ * applications are handed off to the underwriting service for risk decisioning.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class PolicyApplicationService {
+
+    private static final String REFERENCE_PREFIX = "APP";
+
+    private final ApplicantRepository applicantRepository;
+    private final PolicyApplicationRepository applicationRepository;
+    private final PolicyApplicationMapper applicationMapper;
+
+    /**
+     * Creates and submits a new policy application. The applicant is reused if
+     * one already exists for the supplied license number and state, otherwise a
+     * new party record is persisted. Vehicles and coverage lines are attached
+     * via the aggregate, the mandatory-coverage rule is enforced, and the
+     * application is advanced from DRAFT to SUBMITTED before persistence.
+     *
+     * @throws IllegalArgumentException if the payload is null or omits a
+     *                                  statutorily mandatory coverage
+     */
+    @Transactional
+    public PolicyApplicationResponse createApplication(PolicyApplicationRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("Application request must not be null");
+        }
+
+        // Reuse an existing applicant party where the license natural key
+        // matches; otherwise persist a freshly-mapped applicant.
+        Applicant applicant = resolveApplicant(request);
+
+        // Assemble the aggregate root in DRAFT with a unique business reference.
+        PolicyApplication application = PolicyApplication.builder()
+                .applicationReference(newReference())
+                .applicant(applicant)
+                .status(ApplicationStatus.DRAFT)
+                .effectiveDate(request.effectiveDate())
+                .build();
+
+        // Attach each requested vehicle, maintaining the bidirectional link.
+        List<VehicleRequest> vehicleRequests = request.vehicles();
+        if (vehicleRequests != null) {
+            for (VehicleRequest vehicleRequest : vehicleRequests) {
+                Vehicle vehicle = applicationMapper.toVehicle(vehicleRequest);
+                application.addVehicle(vehicle);
+            }
+        }
+
+        // Attach each requested coverage line; premiums are rated later.
+        List<CoverageSelectionRequest> coverageRequests = request.coverages();
+        if (coverageRequests != null) {
+            for (CoverageSelectionRequest coverageRequest : coverageRequests) {
+                CoverageItem item = applicationMapper.toCoverageItem(coverageRequest);
+                application.addCoverageItem(item);
+            }
+        }
+
+        // Enforce that every statutorily mandatory coverage was selected.
+        validateMandatoryCoverages(application);
+
+        // Move the application straight into SUBMITTED and stamp the timestamp.
+        application.transitionTo(ApplicationStatus.SUBMITTED);
+        application.setSubmittedAt(Instant.now());
+
+        PolicyApplication saved = applicationRepository.save(application);
+        log.info("Created application {} for applicant {} with {} vehicle(s) and {} coverage(s)",
+                saved.getApplicationReference(), applicant.getId(),
+                saved.getVehicles().size(), saved.getCoverageItems().size());
+
+        return applicationMapper.toResponse(saved);
+    }
+
+    /**
+     * Retrieves an application by its business reference.
+     */
+    @Transactional(readOnly = true)
+    public PolicyApplicationResponse getByReference(String applicationReference) {
+        PolicyApplication application = applicationRepository
+                .findByApplicationReference(applicationReference)
+                .orElseThrow(() -> ApplicationNotFoundException.forReference(applicationReference));
+        return applicationMapper.toResponse(application);
+    }
+
+    /**
+     * Retrieves an application by its surrogate identifier.
+     */
+    @Transactional(readOnly = true)
+    public PolicyApplicationResponse getById(Long id) {
+        PolicyApplication application = applicationRepository.findById(id)
+                .orElseThrow(() -> ApplicationNotFoundException.forId(id));
+        return applicationMapper.toResponse(application);
+    }
+
+    /**
+     * Lists applications currently in the supplied status, projected into the
+     * read model.
+     */
+    @Transactional(readOnly = true)
+    public List<PolicyApplicationResponse> getByStatus(ApplicationStatus status) {
+        return applicationRepository.findByStatus(status).stream()
+                .map(applicationMapper::toResponse)
+                .toList();
+    }
+
+    /**
+     * Withdraws an application at the applicant's request. Legal only from a
+     * pre-decision state; the entity state machine rejects illegal moves.
+     */
+    @Transactional
+    public PolicyApplicationResponse withdraw(String applicationReference) {
+        PolicyApplication application = applicationRepository
+                .findByApplicationReference(applicationReference)
+                .orElseThrow(() -> ApplicationNotFoundException.forReference(applicationReference));
+
+        application.transitionTo(ApplicationStatus.WITHDRAWN);
+        PolicyApplication saved = applicationRepository.save(application);
+        log.info("Withdrew application {}", saved.getApplicationReference());
+        return applicationMapper.toResponse(saved);
+    }
+
+    /**
+     * Resolves the applicant party, reusing an existing record matched on the
+     * license natural key or persisting a new one.
+     */
+    private Applicant resolveApplicant(PolicyApplicationRequest request) {
+        String licenseNumber = request.applicant().licenseNumber();
+        String licenseState = request.applicant().licenseState();
+
+        return applicantRepository
+                .findByLicenseNumberAndLicenseState(licenseNumber, licenseState)
+                .orElseGet(() -> {
+                    Applicant mapped = applicationMapper.toApplicant(request.applicant());
+                    Applicant persisted = applicantRepository.save(mapped);
+                    log.debug("Registered new applicant {} for license {}/{}",
+                            persisted.getId(), licenseNumber, licenseState);
+                    return persisted;
+                });
+    }
+
+    /**
+     * Verifies that every mandatory coverage type appears in the submitted
+     * selection, rejecting the application otherwise.
+     */
+    private void validateMandatoryCoverages(PolicyApplication application) {
+        // Collect the coverage types the applicant actually selected.
+        Set<CoverageType> selected = EnumSet.noneOf(CoverageType.class);
+        for (CoverageItem item : application.getCoverageItems()) {
+            if (item.getCoverageType() != null) {
+                selected.add(item.getCoverageType());
+            }
+        }
+
+        // Compare against the catalogue's mandatory entries.
+        for (CoverageType type : CoverageType.values()) {
+            if (type.isMandatory() && !selected.contains(type)) {
+                throw new IllegalArgumentException(
+                        "Mandatory coverage missing from application: " + type.name());
+            }
+        }
+    }
+
+    /**
+     * Generates a unique, human-traceable application reference.
+     */
+    private String newReference() {
+        String token = UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
+        return REFERENCE_PREFIX + "-" + token;
+    }
+}

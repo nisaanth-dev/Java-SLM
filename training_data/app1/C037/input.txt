@@ -1,0 +1,139 @@
+CHUNK_ID: C037
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f37 (com.aegisinsure.underwriting.exception.GlobalExceptionHandler)
+LAYER: ExceptionHandler
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.exception;
+
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.WebRequest;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Centralised translation of application exceptions into structured HTTP error
+ * responses. Each handler maps a known failure mode onto the appropriate status
+ * code and emits a consistent {@link ApiErrorResponse} body.
+ */
+@Slf4j
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    /**
+     * Structured error body returned for every handled exception. The
+     * {@code fieldErrors} list is populated only for validation failures.
+     */
+    public record ApiErrorResponse(
+            Instant timestamp,
+            int status,
+            String error,
+            String message,
+            String path,
+            List<String> fieldErrors
+    ) {
+        public static ApiErrorResponse of(HttpStatus status, String message, String path) {
+            return new ApiErrorResponse(
+                    Instant.now(), status.value(), status.getReasonPhrase(),
+                    message, path, List.of());
+        }
+    }
+
+    @ExceptionHandler({
+            ApplicationNotFoundException.class,
+            QuoteNotFoundException.class,
+            PolicyNotFoundException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleNotFound(RuntimeException ex, WebRequest request) {
+        log.warn("Resource not found: {}", ex.getMessage());
+        ApiErrorResponse body = ApiErrorResponse.of(
+                HttpStatus.NOT_FOUND, ex.getMessage(), extractPath(request));
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(body);
+    }
+
+    @ExceptionHandler(InvalidStateTransitionException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidTransition(
+            InvalidStateTransitionException ex, WebRequest request) {
+        log.warn("Invalid state transition: {}", ex.getMessage());
+        ApiErrorResponse body = ApiErrorResponse.of(
+                HttpStatus.CONFLICT, ex.getMessage(), extractPath(request));
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    @ExceptionHandler(ExternalServiceException.class)
+    public ResponseEntity<ApiErrorResponse> handleExternalService(
+            ExternalServiceException ex, WebRequest request) {
+        log.error("Downstream service '{}' failed: {}", ex.getServiceName(), ex.getMessage());
+        String message = "Upstream dependency '" + ex.getServiceName() + "' is unavailable";
+        ApiErrorResponse body = ApiErrorResponse.of(
+                HttpStatus.BAD_GATEWAY, message, extractPath(request));
+        return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(body);
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ApiErrorResponse> handleValidation(
+            MethodArgumentNotValidException ex, WebRequest request) {
+        List<String> fieldErrors = new ArrayList<>();
+        // Flatten each rejected field into a "field: message" string for the body.
+        for (FieldError fieldError : ex.getBindingResult().getFieldErrors()) {
+            fieldErrors.add(fieldError.getField() + ": " + fieldError.getDefaultMessage());
+        }
+        if (fieldErrors.isEmpty()) {
+            fieldErrors.add("Request validation failed");
+        }
+        log.warn("Validation failed with {} field error(s)", fieldErrors.size());
+        ApiErrorResponse body = new ApiErrorResponse(
+                Instant.now(), HttpStatus.BAD_REQUEST.value(),
+                HttpStatus.BAD_REQUEST.getReasonPhrase(),
+                "Request validation failed", extractPath(request), fieldErrors);
+        return ResponseEntity.badRequest().body(body);
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiErrorResponse> handleIllegalArgument(
+            IllegalArgumentException ex, WebRequest request) {
+        log.warn("Illegal argument: {}", ex.getMessage());
+        ApiErrorResponse body = ApiErrorResponse.of(
+                HttpStatus.BAD_REQUEST, ex.getMessage(), extractPath(request));
+        return ResponseEntity.badRequest().body(body);
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiErrorResponse> handleIllegalState(
+            IllegalStateException ex, WebRequest request) {
+        log.warn("Illegal state: {}", ex.getMessage());
+        ApiErrorResponse body = ApiErrorResponse.of(
+                HttpStatus.CONFLICT, ex.getMessage(), extractPath(request));
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiErrorResponse> handleUnexpected(Exception ex, WebRequest request) {
+        log.error("Unhandled exception", ex);
+        ApiErrorResponse body = ApiErrorResponse.of(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "An unexpected error occurred", extractPath(request));
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body);
+    }
+
+    /**
+     * Extracts a clean request path from the Spring {@link WebRequest} description.
+     */
+    private String extractPath(WebRequest request) {
+        if (request == null) {
+            return "";
+        }
+        String description = request.getDescription(false);
+        return description == null ? "" : description.replace("uri=", "");
+    }
+}

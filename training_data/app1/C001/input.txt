@@ -1,0 +1,86 @@
+CHUNK_ID: C001
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f01 (com.aegisinsure.underwriting.config.FeignSupportConfig)
+LAYER: Config
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.config;
+
+import com.aegisinsure.underwriting.exception.ExternalServiceException;
+import feign.Logger;
+import feign.Request;
+import feign.Response;
+import feign.codec.ErrorDecoder;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.util.concurrent.TimeUnit;
+
+/**
+ * Feign client support beans shared by the credit-bureau and fraud-screening
+ * clients: a coarse request-timeout profile, basic wire logging, and an error
+ * decoder that translates any non-2xx downstream response into an
+ * {@link ExternalServiceException}. This ensures upstream faults surface to
+ * callers as HTTP 502 (via the global handler) rather than as opaque Feign
+ * exceptions, keeping the failure contract consistent with the risk-scoring
+ * service's own error wrapping.
+ */
+@Configuration
+public class FeignSupportConfig {
+
+    // Connect/read timeouts applied uniformly to outbound Feign calls.
+    private static final long CONNECT_TIMEOUT_MS = 3000L;
+    private static final long READ_TIMEOUT_MS = 8000L;
+
+    /**
+     * Bounds how long a Feign call waits to establish a connection and to read
+     * the response before failing fast.
+     */
+    @Bean
+    public Request.Options feignRequestOptions() {
+        return new Request.Options(
+                CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS,
+                READ_TIMEOUT_MS, TimeUnit.MILLISECONDS,
+                true);
+    }
+
+    /**
+     * Emits basic request/response lines for Feign calls when debug logging is
+     * enabled on the client interfaces.
+     */
+    @Bean
+    public Logger.Level feignLoggerLevel() {
+        return Logger.Level.BASIC;
+    }
+
+    /**
+     * Provides the error decoder that maps downstream HTTP failures onto the
+     * service's domain exception type.
+     */
+    @Bean
+    public ErrorDecoder feignErrorDecoder() {
+        return new DownstreamErrorDecoder();
+    }
+
+    /**
+     * Error decoder translating Feign transport-level failures into the
+     * service's own external-dependency exception, preserving the failed method
+     * key and the HTTP status for operational triage.
+     */
+    static class DownstreamErrorDecoder implements ErrorDecoder {
+
+        @Override
+        public Exception decode(String methodKey, Response response) {
+            int status = response == null ? 0 : response.status();
+            String service = (methodKey == null || methodKey.isBlank())
+                    ? "downstream-service" : methodKey;
+            // Both 4xx and 5xx downstream responses are treated as an upstream
+            // dependency fault from this service's perspective and surfaced as
+            // a single external-service error to the caller.
+            String detail = "Downstream call " + service + " failed with HTTP status " + status;
+            return new ExternalServiceException(service, detail);
+        }
+    }
+}

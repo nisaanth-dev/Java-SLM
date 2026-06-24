@@ -1,0 +1,62 @@
+CHUNK_ID: C023
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f23 (com.aegisinsure.underwriting.entity.PolicyStatus)
+LAYER: Entity
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.entity;
+
+import java.util.EnumSet;
+import java.util.Set;
+
+/**
+ * Lifecycle states for an issued auto policy. A policy is created in
+ * {@link #PENDING} once a quote is accepted and becomes {@link #ACTIVE} on the
+ * effective date when the binding premium is confirmed.
+ */
+public enum PolicyStatus {
+
+    PENDING,
+    ACTIVE,
+    LAPSED,
+    CANCELLED,
+    EXPIRED;
+
+    /**
+     * Returns the set of legal successor states for the current policy state.
+     */
+    public Set<PolicyStatus> allowedNextStates() {
+        return switch (this) {
+            case PENDING -> EnumSet.of(ACTIVE, CANCELLED);
+            case ACTIVE -> EnumSet.of(LAPSED, CANCELLED, EXPIRED);
+            case LAPSED -> EnumSet.of(ACTIVE, CANCELLED, EXPIRED);
+            case CANCELLED, EXPIRED -> EnumSet.noneOf(PolicyStatus.class);
+        };
+    }
+
+    /**
+     * Tests whether moving from this state to {@code target} is permitted.
+     */
+    public boolean canTransitionTo(PolicyStatus target) {
+        if (target == null) {
+            return false;
+        }
+        return allowedNextStates().contains(target);
+    }
+
+    /**
+     * A policy is in force when it is currently providing coverage.
+     */
+    public boolean isInForce() {
+        return this == ACTIVE;
+    }
+
+    /**
+     * A terminal policy state cannot transition further.
+     */
+    public boolean isTerminal() {
+        return allowedNextStates().isEmpty();
+    }
+}

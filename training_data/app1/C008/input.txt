@@ -1,0 +1,63 @@
+CHUNK_ID: C008
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f08 (com.aegisinsure.underwriting.dto.request.ApplicantRequest)
+LAYER: DTO
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.dto.request;
+
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Past;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+
+import java.time.LocalDate;
+
+/**
+ * Inbound payload describing the primary applicant on a new auto application.
+ * Validation constraints enforce the minimum data-quality bar before the
+ * application is persisted.
+ */
+public record ApplicantRequest(
+
+        @NotBlank(message = "First name is required")
+        @Size(max = 80, message = "First name must not exceed 80 characters")
+        String firstName,
+
+        @NotBlank(message = "Last name is required")
+        @Size(max = 80, message = "Last name must not exceed 80 characters")
+        String lastName,
+
+        @NotNull(message = "Date of birth is required")
+        @Past(message = "Date of birth must be in the past")
+        LocalDate dateOfBirth,
+
+        @Email(message = "Email must be well-formed")
+        @Size(max = 160, message = "Email must not exceed 160 characters")
+        String email,
+
+        @Size(max = 30, message = "Phone must not exceed 30 characters")
+        String phone,
+
+        @NotBlank(message = "License number is required")
+        @Size(max = 40, message = "License number must not exceed 40 characters")
+        String licenseNumber,
+
+        @NotBlank(message = "License state is required")
+        @Pattern(regexp = "[A-Z]{2}", message = "License state must be a 2-letter code")
+        String licenseState,
+
+        @Past(message = "License issue date must be in the past")
+        LocalDate licenseIssueDate,
+
+        @Size(max = 20, message = "Marital status must not exceed 20 characters")
+        String maritalStatus,
+
+        @Pattern(regexp = "\\d{5}(-\\d{4})?", message = "Residence ZIP must be a valid US ZIP")
+        String residenceZip
+) {
+}

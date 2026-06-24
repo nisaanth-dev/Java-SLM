@@ -1,0 +1,55 @@
+CHUNK_ID: C020
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f20 (com.aegisinsure.underwriting.entity.CoverageType)
+LAYER: Entity
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.entity;
+
+import java.math.BigDecimal;
+
+/**
+ * Catalogue of auto coverage types a policyholder may select. Each entry
+ * carries the base annual premium rate used as the starting point for premium
+ * calculation before risk, driver, and vehicle factors are applied.
+ */
+public enum CoverageType {
+
+    LIABILITY_BODILY_INJURY("Bodily Injury Liability", new BigDecimal("480.00"), true),
+    LIABILITY_PROPERTY_DAMAGE("Property Damage Liability", new BigDecimal("320.00"), true),
+    COLLISION("Collision", new BigDecimal("560.00"), false),
+    COMPREHENSIVE("Comprehensive", new BigDecimal("300.00"), false),
+    UNINSURED_MOTORIST("Uninsured/Underinsured Motorist", new BigDecimal("140.00"), false),
+    MEDICAL_PAYMENTS("Medical Payments", new BigDecimal("90.00"), false);
+
+    private final String displayName;
+    private final BigDecimal baseAnnualRate;
+    private final boolean mandatory;
+
+    CoverageType(String displayName, BigDecimal baseAnnualRate, boolean mandatory) {
+        this.displayName = displayName;
+        this.baseAnnualRate = baseAnnualRate;
+        this.mandatory = mandatory;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    /**
+     * The statutory base annual rate before rating factors are applied.
+     */
+    public BigDecimal getBaseAnnualRate() {
+        return baseAnnualRate;
+    }
+
+    /**
+     * Whether state regulation requires this coverage on every policy. Used by
+     * the application service to validate the submitted coverage selection.
+     */
+    public boolean isMandatory() {
+        return mandatory;
+    }
+}

@@ -1,0 +1,218 @@
+CHUNK_ID: C057
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f57 (com.aegisinsure.underwriting.service.UnderwritingService)
+LAYER: Service
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.service;
+
+import com.aegisinsure.underwriting.config.UnderwritingProperties;
+import com.aegisinsure.underwriting.dto.response.PolicyApplicationResponse;
+import com.aegisinsure.underwriting.entity.ApplicationStatus;
+import com.aegisinsure.underwriting.entity.PolicyApplication;
+import com.aegisinsure.underwriting.entity.RiskTier;
+import com.aegisinsure.underwriting.exception.ApplicationNotFoundException;
+import com.aegisinsure.underwriting.exception.InvalidStateTransitionException;
+import com.aegisinsure.underwriting.event.publisher.UnderwritingEventPublisher;
+import com.aegisinsure.underwriting.mapper.PolicyApplicationMapper;
+import com.aegisinsure.underwriting.repository.PolicyApplicationRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Locale;
+
+/**
+ * Underwriting decision service. Drives a submitted application through review:
+ * it computes the composite risk score via the {@link RiskScoringService},
+ * applies the configured decision thresholds to auto-approve, refer, or decline
+ * the application, records the binding decision, and publishes the outcome to
+ * the application lifecycle topic. It also supports manual underwriter overrides
+ * and referral of applications whose vehicle inspection has failed.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class UnderwritingService {
+
+    private static final String SYSTEM_DECISIONER = "SYSTEM-UW";
+
+    private final PolicyApplicationRepository applicationRepository;
+    private final RiskScoringService riskScoringService;
+    private final UnderwritingEventPublisher eventPublisher;
+    private final PolicyApplicationMapper applicationMapper;
+    private final UnderwritingProperties properties;
+
+    /**
+     * Underwrites a submitted application. Moves it into review, scores it,
+     * decides the outcome against the auto-decline and manual-referral
+     * thresholds, records the decision, and emits the corresponding lifecycle
+     * event.
+     *
+     * @throws ApplicationNotFoundException     if the reference is unknown
+     * @throws InvalidStateTransitionException  if the application is not awaiting
+     *                                          underwriting
+     */
+    @Transactional
+    public PolicyApplicationResponse underwrite(String applicationReference) {
+        PolicyApplication application = applicationRepository
+                .findByApplicationReference(applicationReference)
+                .orElseThrow(() -> ApplicationNotFoundException.forReference(applicationReference));
+
+        // Only a freshly-submitted application may enter underwriting review.
+        if (application.getStatus() != ApplicationStatus.SUBMITTED) {
+            throw InvalidStateTransitionException.of(
+                    "application", application.getStatus(), ApplicationStatus.UNDER_REVIEW);
+        }
+
+        application.transitionTo(ApplicationStatus.UNDER_REVIEW);
+
+        // Pull external signals and compute the composite score in place.
+        riskScoringService.scoreApplication(application);
+
+        // Translate the score and tier into a binding disposition.
+        int score = application.getRiskScore() == null ? 0 : application.getRiskScore();
+        RiskTier tier = application.getRiskTier();
+        ApplicationStatus outcome = decideOutcome(score, tier);
+        String reason = buildReason(outcome, score, tier);
+
+        application.recordDecision(outcome, reason, SYSTEM_DECISIONER);
+        PolicyApplication saved = applicationRepository.save(application);
+
+        // Broadcast the outcome to interested downstream consumers.
+        eventPublisher.publishDecision(saved, eventTypeFor(outcome));
+        log.info("Underwrote application {}: score={}, tier={}, outcome={}",
+                saved.getApplicationReference(), score, tier, outcome);
+
+        return applicationMapper.toResponse(saved);
+    }
+
+    /**
+     * Records a manual underwriter decision on an application currently in
+     * review or referred status. Only APPROVED or DECLINED outcomes are valid.
+     *
+     * @throws IllegalArgumentException        if the outcome string is not a
+     *                                         legal manual disposition
+     * @throws InvalidStateTransitionException if the application is not in a
+     *                                         decidable state
+     */
+    @Transactional
+    public PolicyApplicationResponse recordManualDecision(String applicationReference,
+                                                          String outcome, String notes,
+                                                          String decisionedBy) {
+        PolicyApplication application = applicationRepository
+                .findByApplicationReference(applicationReference)
+                .orElseThrow(() -> ApplicationNotFoundException.forReference(applicationReference));
+
+        // Manual decisions are accepted only while the file is open for review.
+        ApplicationStatus current = application.getStatus();
+        if (current != ApplicationStatus.UNDER_REVIEW && current != ApplicationStatus.REFERRED) {
+            throw InvalidStateTransitionException.of("application", current, outcome);
+        }
+
+        ApplicationStatus target = parseManualOutcome(outcome);
+        String decider = (decisionedBy == null || decisionedBy.isBlank()) ? "MANUAL" : decisionedBy;
+        String reason = (notes == null || notes.isBlank())
+                ? "Manual " + target.name().toLowerCase(Locale.ROOT) + " decision" : notes;
+
+        application.recordDecision(target, reason, decider);
+        PolicyApplication saved = applicationRepository.save(application);
+
+        eventPublisher.publishDecision(saved, eventTypeFor(target));
+        log.info("Manual decision on application {} by {}: {}",
+                saved.getApplicationReference(), decider, target);
+
+        return applicationMapper.toResponse(saved);
+    }
+
+    /**
+     * Refers an application back for review when its vehicle inspection fails.
+     * Invoked asynchronously by the inspection event listener. The referral is
+     * only applied when the state machine permits it; otherwise the failure is
+     * logged and ignored so a late inspection cannot corrupt a bound policy.
+     */
+    @Transactional
+    public void handleFailedInspection(String applicationReference, String reason) {
+        PolicyApplication application = applicationRepository
+                .findByApplicationReference(applicationReference)
+                .orElse(null);
+
+        if (application == null) {
+            log.warn("Failed-inspection event for unknown application {}", applicationReference);
+            return;
+        }
+
+        // Refer only if the current state legally allows it.
+        if (application.getStatus().canTransitionTo(ApplicationStatus.REFERRED)) {
+            application.recordDecision(ApplicationStatus.REFERRED,
+                    "Referred after failed vehicle inspection: " + reason, "INSPECTION");
+            PolicyApplication saved = applicationRepository.save(application);
+            eventPublisher.publishDecision(saved, eventTypeFor(ApplicationStatus.REFERRED));
+            log.info("Referred application {} after failed inspection", saved.getApplicationReference());
+        } else {
+            log.warn("Failed inspection for application {} in non-referable state {}",
+                    applicationReference, application.getStatus());
+        }
+    }
+
+    /**
+     * Applies the configured thresholds to map a score and tier onto a binding
+     * application disposition.
+     */
+    private ApplicationStatus decideOutcome(int score, RiskTier tier) {
+        if (score >= properties.risk().autoDeclineThreshold() || tier == RiskTier.DECLINE) {
+            return ApplicationStatus.DECLINED;
+        } else if (score >= properties.risk().manualReferralThreshold()
+                || tier == RiskTier.SUBSTANDARD) {
+            return ApplicationStatus.REFERRED;
+        }
+        return ApplicationStatus.APPROVED;
+    }
+
+    /**
+     * Builds a human-readable decision reason for the recorded disposition.
+     */
+    private String buildReason(ApplicationStatus outcome, int score, RiskTier tier) {
+        return switch (outcome) {
+            case DECLINED -> "Composite risk score " + score
+                    + " at or above auto-decline threshold (tier " + tier + ")";
+            case REFERRED -> "Composite risk score " + score
+                    + " requires manual underwriter review (tier " + tier + ")";
+            case APPROVED -> "Composite risk score " + score + " within automatic approval band (tier "
+                    + tier + ")";
+            default -> "Risk score " + score;
+        };
+    }
+
+    /**
+     * Maps a disposition onto its lifecycle event type name.
+     */
+    private String eventTypeFor(ApplicationStatus outcome) {
+        return switch (outcome) {
+            case APPROVED -> "APPLICATION_APPROVED";
+            case DECLINED -> "APPLICATION_DECLINED";
+            case REFERRED -> "APPLICATION_REFERRED";
+            default -> "APPLICATION_STATUS_CHANGED";
+        };
+    }
+
+    /**
+     * Parses a manual outcome string into the corresponding application status,
+     * rejecting anything other than an approval or decline.
+     */
+    private ApplicationStatus parseManualOutcome(String outcome) {
+        if (outcome == null) {
+            throw new IllegalArgumentException("Manual outcome must be APPROVED or DECLINED");
+        }
+        String normalised = outcome.trim().toUpperCase(Locale.ROOT);
+        return switch (normalised) {
+            case "APPROVED", "APPROVE" -> ApplicationStatus.APPROVED;
+            case "DECLINED", "DECLINE" -> ApplicationStatus.DECLINED;
+            default -> throw new IllegalArgumentException(
+                    "Unsupported manual outcome: " + outcome + " (expected APPROVED or DECLINED)");
+        };
+    }
+}

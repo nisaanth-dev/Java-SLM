@@ -1,0 +1,51 @@
+CHUNK_ID: C047
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f47 (com.aegisinsure.underwriting.repository.PolicyRepository)
+LAYER: Repository
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.repository;
+
+import com.aegisinsure.underwriting.entity.Policy;
+import com.aegisinsure.underwriting.entity.PolicyStatus;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Data-access repository for issued {@link Policy} records.
+ */
+@Repository
+public interface PolicyRepository extends JpaRepository<Policy, Long> {
+
+    /**
+     * Locates a policy by its unique policy number.
+     */
+    Optional<Policy> findByPolicyNumber(String policyNumber);
+
+    /**
+     * Returns all policies bound from a given application.
+     */
+    List<Policy> findByApplicationId(Long applicationId);
+
+    /**
+     * Returns all policies currently in the supplied status.
+     */
+    List<Policy> findByStatus(PolicyStatus status);
+
+    /**
+     * Finds active policies whose term has ended on or before the supplied
+     * business date, used by the expiry sweep.
+     */
+    @Query("select p from Policy p where p.status = :status "
+            + "and p.expirationDate < :businessDate")
+    List<Policy> findExpired(@Param("status") PolicyStatus status,
+                             @Param("businessDate") LocalDate businessDate);
+}

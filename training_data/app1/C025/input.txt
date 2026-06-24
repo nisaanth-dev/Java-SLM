@@ -1,0 +1,52 @@
+CHUNK_ID: C025
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f25 (com.aegisinsure.underwriting.entity.QuoteStatus)
+LAYER: Entity
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.entity;
+
+import java.util.EnumSet;
+import java.util.Set;
+
+/**
+ * Lifecycle states for a premium quote generated from an approved application.
+ */
+public enum QuoteStatus {
+
+    DRAFT,
+    ISSUED,
+    ACCEPTED,
+    EXPIRED,
+    REJECTED;
+
+    /**
+     * Returns the set of legal successor states for this quote state.
+     */
+    public Set<QuoteStatus> allowedNextStates() {
+        return switch (this) {
+            case DRAFT -> EnumSet.of(ISSUED, REJECTED);
+            case ISSUED -> EnumSet.of(ACCEPTED, EXPIRED, REJECTED);
+            case ACCEPTED, EXPIRED, REJECTED -> EnumSet.noneOf(QuoteStatus.class);
+        };
+    }
+
+    /**
+     * Tests whether a transition from this state to {@code target} is allowed.
+     */
+    public boolean canTransitionTo(QuoteStatus target) {
+        if (target == null) {
+            return false;
+        }
+        return allowedNextStates().contains(target);
+    }
+
+    /**
+     * A quote can be bound into a policy only while it is in the issued state.
+     */
+    public boolean isBindable() {
+        return this == ISSUED;
+    }
+}

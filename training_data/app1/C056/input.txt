@@ -1,0 +1,233 @@
+CHUNK_ID: C056
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f56 (com.aegisinsure.underwriting.service.RiskScoringService)
+LAYER: Service
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.service;
+
+import com.aegisinsure.underwriting.config.UnderwritingProperties;
+import com.aegisinsure.underwriting.dto.response.CreditReportResult;
+import com.aegisinsure.underwriting.dto.response.FraudScreeningResult;
+import com.aegisinsure.underwriting.entity.Applicant;
+import com.aegisinsure.underwriting.entity.PolicyApplication;
+import com.aegisinsure.underwriting.entity.RiskTier;
+import com.aegisinsure.underwriting.entity.Vehicle;
+import com.aegisinsure.underwriting.exception.ExternalServiceException;
+import com.aegisinsure.underwriting.util.AgeCalculator;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDate;
+import java.util.List;
+
+/**
+ * Computes the composite underwriting risk score for an application by pulling
+ * external credit and fraud signals and combining them with driver and vehicle
+ * characteristics. The resulting score, tier, and the raw credit/fraud scores
+ * are written back onto the supplied {@link PolicyApplication} entity.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class RiskScoringService {
+
+    private static final String CREDIT_SERVICE = "credit-bureau-service";
+    private static final String FRAUD_SERVICE = "fraud-detection-service";
+
+    private static final int SCORE_FLOOR = 0;
+    private static final int SCORE_CEILING = 100;
+    private static final int BASELINE_SCORE = 50;
+
+    private final CreditBureauClient creditBureauClient;
+    private final FraudScreeningClient fraudScreeningClient;
+    private final UnderwritingProperties properties;
+
+    /**
+     * Gathers external signals and computes the composite risk score, mutating
+     * the application in place. Downstream call failures are translated into an
+     * {@link ExternalServiceException} so the underwriting flow can abort and
+     * the caller receives an HTTP 502.
+     */
+    public void scoreApplication(PolicyApplication application) {
+        if (application == null) {
+            throw new IllegalArgumentException("Application must not be null for risk scoring");
+        }
+        Applicant applicant = application.getApplicant();
+        if (applicant == null) {
+            throw new IllegalArgumentException("Application has no applicant to score");
+        }
+
+        CreditReportResult credit = fetchCredit(applicant);
+        FraudScreeningResult fraud = fetchFraud(applicant);
+
+        int score = BASELINE_SCORE;
+        score += creditComponent(credit);
+        score += fraudComponent(fraud);
+        score += flagComponent(credit, fraud);
+        score += driverComponent(applicant);
+        score += vehicleComponent(application.getVehicles());
+
+        int clamped = clamp(score);
+        RiskTier tier = RiskTier.fromScore(clamped);
+
+        application.setCreditScore(credit.creditScore());
+        application.setFraudScore(fraud.fraudScore());
+        application.setRiskScore(clamped);
+        application.setRiskTier(tier);
+
+        log.debug("Scored application {}: composite={}, tier={}",
+                application.getApplicationReference(), clamped, tier);
+    }
+
+    /**
+     * Pulls the credit report, wrapping transport failures.
+     */
+    private CreditReportResult fetchCredit(Applicant applicant) {
+        try {
+            CreditReportResult result = creditBureauClient.fetchCreditReport(
+                    applicant.getLicenseNumber(), applicant.getLicenseState());
+            if (result == null) {
+                throw new ExternalServiceException(CREDIT_SERVICE, "Empty credit report response");
+            }
+            return result;
+        } catch (ExternalServiceException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new ExternalServiceException(CREDIT_SERVICE, "Credit pull failed", ex);
+        }
+    }
+
+    /**
+     * Runs fraud screening, wrapping transport failures.
+     */
+    private FraudScreeningResult fetchFraud(Applicant applicant) {
+        try {
+            FraudScreeningResult result = fraudScreeningClient.screenApplicant(
+                    applicant.getLicenseNumber(), applicant.getLastName());
+            if (result == null) {
+                throw new ExternalServiceException(FRAUD_SERVICE, "Empty fraud screening response");
+            }
+            return result;
+        } catch (ExternalServiceException ex) {
+            throw ex;
+        } catch (RuntimeException ex) {
+            throw new ExternalServiceException(FRAUD_SERVICE, "Fraud screening failed", ex);
+        }
+    }
+
+    /**
+     * Maps the credit score onto a risk contribution: weaker credit raises the
+     * score, stronger credit reduces it.
+     */
+    private int creditComponent(CreditReportResult credit) {
+        int creditScore = credit.creditScore();
+        if (creditScore < 580) {
+            return 20;
+        } else if (creditScore < 620) {
+            return 14;
+        } else if (creditScore < 660) {
+            return 8;
+        } else if (creditScore < 700) {
+            return 2;
+        } else if (creditScore < 760) {
+            return 0;
+        } else if (creditScore < 800) {
+            return -8;
+        }
+        return -15;
+    }
+
+    /**
+     * Maps the fraud propensity score onto a risk contribution.
+     */
+    private int fraudComponent(FraudScreeningResult fraud) {
+        int fraudScore = fraud.fraudScore();
+        if (fraudScore >= 80) {
+            return 28;
+        } else if (fraudScore >= 60) {
+            return 18;
+        } else if (fraudScore >= 40) {
+            return 9;
+        } else if (fraudScore >= 20) {
+            return 3;
+        }
+        return 0;
+    }
+
+    /**
+     * Adds categorical flag loadings from both external reports.
+     */
+    private int flagComponent(CreditReportResult credit, FraudScreeningResult fraud) {
+        int delta = 0;
+        if (fraud.watchlistHit()) {
+            delta += 30;
+        }
+        if (fraud.identityMismatch()) {
+            delta += 20;
+        }
+        if (credit.bankruptcyFlag()) {
+            delta += 12;
+        }
+        if (credit.thinFile()) {
+            delta += properties.risk().thinFileSurcharge();
+        }
+        return delta;
+    }
+
+    /**
+     * Adds driver-based loadings derived from age and license tenure.
+     */
+    private int driverComponent(Applicant applicant) {
+        LocalDate today = LocalDate.now();
+        int delta = 0;
+        int age = AgeCalculator.ageInYears(applicant.getDateOfBirth(), today);
+        if (age > 0 && age < 25) {
+            delta += 12;
+        } else if (age > 70) {
+            delta += 6;
+        }
+        int yearsLicensed = AgeCalculator.yearsBetween(applicant.getLicenseIssueDate(), today);
+        if (applicant.getLicenseIssueDate() != null && yearsLicensed < 3) {
+            delta += 8;
+        }
+        return delta;
+    }
+
+    /**
+     * Adds vehicle-based loadings by iterating the insured vehicles. High value,
+     * high mileage, and commercial use each raise the risk score.
+     */
+    private int vehicleComponent(List<Vehicle> vehicles) {
+        if (vehicles == null || vehicles.isEmpty()) {
+            return 0;
+        }
+        int delta = 0;
+        for (Vehicle vehicle : vehicles) {
+            if (vehicle.getStatedValue() != null
+                    && vehicle.getStatedValue().doubleValue() > 60000d) {
+                delta += 5;
+            }
+            if (vehicle.getAnnualMileage() > 18000) {
+                delta += 4;
+            }
+            if (vehicle.isCommercialUse()) {
+                delta += 6;
+            }
+        }
+        return delta;
+    }
+
+    /**
+     * Clamps the raw score into the inclusive 0-100 band.
+     */
+    private int clamp(int score) {
+        if (score < SCORE_FLOOR) {
+            return SCORE_FLOOR;
+        }
+        return Math.min(score, SCORE_CEILING);
+    }
+}

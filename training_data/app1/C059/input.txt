@@ -1,0 +1,59 @@
+CHUNK_ID: C059
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f59 (com.aegisinsure.underwriting.util.AgeCalculator)
+LAYER: Util
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.util;
+
+import java.time.LocalDate;
+import java.time.Period;
+
+/**
+ * Stateless date-arithmetic helpers for deriving driver age and license tenure,
+ * both of which feed the risk-scoring and premium-rating engines.
+ */
+public final class AgeCalculator {
+
+    private AgeCalculator() {
+        // Utility class; not instantiable.
+    }
+
+    /**
+     * Computes a whole-year age as of the supplied reference date. Returns zero
+     * when either date is null or the date of birth is in the future relative
+     * to the reference.
+     */
+    public static int ageInYears(LocalDate dateOfBirth, LocalDate asOf) {
+        if (dateOfBirth == null || asOf == null) {
+            return 0;
+        }
+        if (dateOfBirth.isAfter(asOf)) {
+            return 0;
+        }
+        return Period.between(dateOfBirth, asOf).getYears();
+    }
+
+    /**
+     * Computes whole years between two dates, used for license tenure. Returns
+     * zero when either date is null or the start is after the end.
+     */
+    public static int yearsBetween(LocalDate start, LocalDate end) {
+        if (start == null || end == null) {
+            return 0;
+        }
+        if (start.isAfter(end)) {
+            return 0;
+        }
+        return Period.between(start, end).getYears();
+    }
+
+    /**
+     * Convenience guard indicating whether a driver is a minor as of today.
+     */
+    public static boolean isMinor(LocalDate dateOfBirth) {
+        return ageInYears(dateOfBirth, LocalDate.now()) < 18;
+    }
+}

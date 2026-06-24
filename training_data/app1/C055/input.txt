@@ -1,0 +1,230 @@
+CHUNK_ID: C055
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f55 (com.aegisinsure.underwriting.service.QuoteService)
+LAYER: Service
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.service;
+
+import com.aegisinsure.underwriting.config.UnderwritingProperties;
+import com.aegisinsure.underwriting.dto.response.QuoteResponse;
+import com.aegisinsure.underwriting.entity.ApplicationStatus;
+import com.aegisinsure.underwriting.entity.CoverageItem;
+import com.aegisinsure.underwriting.entity.PolicyApplication;
+import com.aegisinsure.underwriting.entity.Quote;
+import com.aegisinsure.underwriting.entity.QuoteStatus;
+import com.aegisinsure.underwriting.exception.ApplicationNotFoundException;
+import com.aegisinsure.underwriting.exception.QuoteNotFoundException;
+import com.aegisinsure.underwriting.mapper.QuoteMapper;
+import com.aegisinsure.underwriting.repository.PolicyApplicationRepository;
+import com.aegisinsure.underwriting.repository.QuoteRepository;
+import com.aegisinsure.underwriting.util.MoneyUtils;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
+
+/**
+ * Quote lifecycle service. Generates a priced quote from an approved
+ * application (delegating per-coverage rating to the premium-calculation
+ * service, then layering on the policy fee, premium tax, installment surcharge,
+ * and validity window), supports customer acceptance and rejection, and runs
+ * the batch that expires stale quotes for the scheduler.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class QuoteService {
+
+    private static final String REFERENCE_PREFIX = "QTE";
+    private static final int DEFAULT_INSTALLMENT_COUNT = 12;
+
+    private final QuoteRepository quoteRepository;
+    private final PremiumCalculationService premiumCalculationService;
+    private final QuoteMapper quoteMapper;
+    private final PolicyApplicationRepository applicationRepository;
+    private final UnderwritingProperties properties;
+
+    /**
+     * Generates and issues a quote for an approved application. Rates the
+     * coverages, sums the annual premium, applies fees and taxes, builds the
+     * installment plan, and persists the quote in ISSUED status.
+     *
+     * @throws ApplicationNotFoundException if the reference is unknown
+     * @throws IllegalStateException        if the application is not approved
+     */
+    @Transactional
+    public QuoteResponse generateQuote(String applicationReference) {
+        PolicyApplication application = applicationRepository
+                .findByApplicationReference(applicationReference)
+                .orElseThrow(() -> ApplicationNotFoundException.forReference(applicationReference));
+
+        // Only an approved application is eligible for a quote.
+        if (application.getStatus() != ApplicationStatus.APPROVED) {
+            throw new IllegalStateException("Only approved applications can be quoted; application "
+                    + applicationReference + " is " + application.getStatus());
+        }
+
+        // Rate every coverage line and persist the per-line premiums.
+        PolicyApplication rated = premiumCalculationService.calculateAndPersist(application.getId());
+
+        // Sum the rated coverage premiums into the annual premium.
+        BigDecimal annualPremium = sumCoveragePremiums(rated);
+
+        // Layer on the flat policy fee and the premium tax.
+        BigDecimal fees = MoneyUtils.round(properties.premium().policyFee());
+        BigDecimal taxes = MoneyUtils.charge(annualPremium, properties.premium().taxRate());
+        BigDecimal baseTotal = MoneyUtils.round(annualPremium.add(fees).add(taxes));
+
+        // Paying by installments attracts a surcharge on the total payable.
+        BigDecimal installmentSurcharge =
+                MoneyUtils.charge(baseTotal, properties.premium().installmentSurchargeRate());
+        BigDecimal totalPayable = MoneyUtils.round(baseTotal.add(installmentSurcharge));
+        BigDecimal installmentAmount = MoneyUtils.perInstallment(totalPayable, DEFAULT_INSTALLMENT_COUNT);
+
+        Instant now = Instant.now();
+        Instant expiresAt = now.plus(properties.quote().validityDays(), ChronoUnit.DAYS);
+
+        // Build the quote in DRAFT, then issue it through the state machine.
+        Quote quote = Quote.builder()
+                .quoteReference(newReference())
+                .application(rated)
+                .status(QuoteStatus.DRAFT)
+                .annualPremium(annualPremium)
+                .fees(fees)
+                .taxes(taxes)
+                .totalPayable(totalPayable)
+                .installmentCount(DEFAULT_INSTALLMENT_COUNT)
+                .installmentAmount(installmentAmount)
+                .issuedAt(now)
+                .expiresAt(expiresAt)
+                .build();
+        quote.transitionTo(QuoteStatus.ISSUED);
+
+        rated.addQuote(quote);
+        Quote saved = quoteRepository.save(quote);
+        log.info("Issued quote {} for application {}: annual={}, total={}",
+                saved.getQuoteReference(), applicationReference, annualPremium, totalPayable);
+
+        return quoteMapper.toResponse(saved);
+    }
+
+    /**
+     * Retrieves a quote by its business reference.
+     */
+    @Transactional(readOnly = true)
+    public QuoteResponse getByReference(String quoteReference) {
+        Quote quote = quoteRepository.findByQuoteReference(quoteReference)
+                .orElseThrow(() -> QuoteNotFoundException.forReference(quoteReference));
+        return quoteMapper.toResponse(quote);
+    }
+
+    /**
+     * Lists every quote generated for an application, newest first.
+     */
+    @Transactional(readOnly = true)
+    public List<QuoteResponse> getByApplicationReference(String applicationReference) {
+        PolicyApplication application = applicationRepository
+                .findByApplicationReference(applicationReference)
+                .orElseThrow(() -> ApplicationNotFoundException.forReference(applicationReference));
+        return quoteRepository.findByApplicationIdOrderByCreatedAtDesc(application.getId()).stream()
+                .map(quoteMapper::toResponse)
+                .toList();
+    }
+
+    /**
+     * Accepts an issued quote, moving it to ACCEPTED so it can be bound into a
+     * policy.
+     */
+    @Transactional
+    public QuoteResponse acceptQuote(String quoteReference) {
+        Quote quote = loadForTransition(quoteReference);
+        quote.transitionTo(QuoteStatus.ACCEPTED);
+        Quote saved = quoteRepository.save(quote);
+        log.info("Accepted quote {}", saved.getQuoteReference());
+        return quoteMapper.toResponse(saved);
+    }
+
+    /**
+     * Rejects a quote at the customer's request.
+     */
+    @Transactional
+    public QuoteResponse rejectQuote(String quoteReference) {
+        Quote quote = loadForTransition(quoteReference);
+        quote.transitionTo(QuoteStatus.REJECTED);
+        Quote saved = quoteRepository.save(quote);
+        log.info("Rejected quote {}", saved.getQuoteReference());
+        return quoteMapper.toResponse(saved);
+    }
+
+    /**
+     * Expires issued quotes whose validity window has elapsed. Bounded by the
+     * configured batch size and invoked by the expiry scheduler.
+     *
+     * @return the number of quotes transitioned to EXPIRED
+     */
+    @Transactional
+    public int expireStaleQuotes() {
+        Instant now = Instant.now();
+        List<Quote> expirable = quoteRepository.findExpirable(QuoteStatus.ISSUED, now);
+        if (expirable.isEmpty()) {
+            return 0;
+        }
+
+        int batchSize = properties.quote().expiryBatchSize();
+        int processed = 0;
+
+        // Expire up to the configured batch ceiling in this run.
+        for (Quote quote : expirable) {
+            if (processed >= batchSize) {
+                break;
+            }
+            quote.transitionTo(QuoteStatus.EXPIRED);
+            processed++;
+        }
+
+        quoteRepository.saveAll(expirable.subList(0, processed));
+        log.info("Expired {} stale quote(s) (candidates={}, batchSize={})",
+                processed, expirable.size(), batchSize);
+        return processed;
+    }
+
+    /**
+     * Sums the calculated premium across every coverage line on the application.
+     */
+    private BigDecimal sumCoveragePremiums(PolicyApplication application) {
+        BigDecimal total = BigDecimal.ZERO;
+        List<CoverageItem> items = application.getCoverageItems();
+        if (items != null) {
+            for (CoverageItem item : items) {
+                total = total.add(MoneyUtils.safe(item.getCalculatedPremium()));
+            }
+        }
+        return MoneyUtils.round(total);
+    }
+
+    /**
+     * Loads a quote for a state transition, raising a 404 when absent.
+     */
+    private Quote loadForTransition(String quoteReference) {
+        return quoteRepository.findByQuoteReference(quoteReference)
+                .orElseThrow(() -> QuoteNotFoundException.forReference(quoteReference));
+    }
+
+    /**
+     * Generates a unique, human-traceable quote reference.
+     */
+    private String newReference() {
+        String token = UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
+        return REFERENCE_PREFIX + "-" + token;
+    }
+}

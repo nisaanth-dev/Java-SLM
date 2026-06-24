@@ -1,0 +1,48 @@
+CHUNK_ID: C049
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f49 (com.aegisinsure.underwriting.scheduler.QuoteExpiryScheduler)
+LAYER: Scheduler
+ENTRY_POINT: yes
+
+=== CODE ===
+package com.aegisinsure.underwriting.scheduler;
+
+import com.aegisinsure.underwriting.service.QuoteService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+/**
+ * Scheduled job that periodically expires issued quotes whose validity window
+ * has elapsed. The cron expression is configurable via
+ * {@code underwriting.scheduling.quote-expiry-cron} and defaults to every
+ * thirty minutes. The heavy lifting (and transactional boundary) lives in the
+ * quote service; this component only triggers it and reports the outcome.
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class QuoteExpiryScheduler {
+
+    private final QuoteService quoteService;
+
+    /**
+     * Runs the stale-quote expiry sweep on the configured schedule. Failures are
+     * caught and logged so a single bad run does not suppress later executions.
+     */
+    @Scheduled(cron = "${underwriting.scheduling.quote-expiry-cron:0 0/30 * * * *}")
+    public void expireStaleQuotes() {
+        try {
+            int expired = quoteService.expireStaleQuotes();
+            if (expired > 0) {
+                log.info("Quote expiry sweep completed: {} quote(s) expired", expired);
+            } else {
+                log.debug("Quote expiry sweep completed: no stale quotes found");
+            }
+        } catch (RuntimeException ex) {
+            log.error("Quote expiry sweep failed: {}", ex.getMessage(), ex);
+        }
+    }
+}

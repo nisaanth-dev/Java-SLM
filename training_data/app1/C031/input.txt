@@ -1,0 +1,33 @@
+CHUNK_ID: C031
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f31 (com.aegisinsure.underwriting.event.PaymentConfirmedEvent)
+LAYER: EventPublisher
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.event;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+
+/**
+ * Inbound event consumed from the billing service when a premium payment is
+ * confirmed. Receipt of this event for a pending policy activates that policy.
+ *
+ * @param paymentId      the billing system payment identifier
+ * @param policyNumber   the policy the payment applies to
+ * @param quoteReference the originating quote reference, for reconciliation
+ * @param amount         the confirmed payment amount
+ * @param currency       ISO currency code of the payment
+ * @param confirmedAt    the instant the payment cleared
+ */
+public record PaymentConfirmedEvent(
+        String paymentId,
+        String policyNumber,
+        String quoteReference,
+        BigDecimal amount,
+        String currency,
+        Instant confirmedAt
+) {
+}

@@ -1,0 +1,143 @@
+CHUNK_ID: C002
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f02 (com.aegisinsure.underwriting.config.KafkaConfig)
+LAYER: Config
+ENTRY_POINT: yes
+
+=== CODE ===
+package com.aegisinsure.underwriting.config;
+
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.config.TopicBuilder;
+import org.springframework.kafka.core.ConsumerFactory;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.core.ProducerFactory;
+import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.support.serializer.JsonDeserializer;
+import org.springframework.kafka.support.serializer.JsonSerializer;
+import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.common.config.TopicConfig;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Kafka wiring for the underwriting service. Declares the canonical topic names
+ * as constants (the single source of truth shared by publishers and listeners),
+ * provisions the published topics via {@link NewTopic} beans, and configures
+ * JSON-serialised producer and consumer infrastructure.
+ */
+@Configuration
+public class KafkaConfig {
+
+    /** Topic carrying application lifecycle domain events published by this service. */
+    public static final String APPLICATION_LIFECYCLE_TOPIC = "underwriting.application.lifecycle";
+
+    /** Topic carrying policy lifecycle domain events published by this service. */
+    public static final String POLICY_LIFECYCLE_TOPIC = "underwriting.policy.lifecycle";
+
+    /** Externally-owned topic of confirmed premium payments consumed by this service. */
+    public static final String PAYMENT_CONFIRMED_TOPIC = "billing.payment.confirmed";
+
+    /** Externally-owned topic of completed vehicle inspections consumed by this service. */
+    public static final String VEHICLE_INSPECTION_TOPIC = "inspection.vehicle.completed";
+
+    @Value("${spring.kafka.bootstrap-servers}")
+    private String bootstrapServers;
+
+    @Value("${spring.kafka.consumer.group-id}")
+    private String consumerGroupId;
+
+    /**
+     * Creates the application lifecycle topic with a compaction-friendly
+     * retention profile.
+     */
+    @Bean
+    public NewTopic applicationLifecycleTopic() {
+        return TopicBuilder.name(APPLICATION_LIFECYCLE_TOPIC)
+                .partitions(6)
+                .replicas(3)
+                .config(TopicConfig.RETENTION_MS_CONFIG, "604800000")
+                .build();
+    }
+
+    /**
+     * Creates the policy lifecycle topic.
+     */
+    @Bean
+    public NewTopic policyLifecycleTopic() {
+        return TopicBuilder.name(POLICY_LIFECYCLE_TOPIC)
+                .partitions(6)
+                .replicas(3)
+                .config(TopicConfig.RETENTION_MS_CONFIG, "604800000")
+                .build();
+    }
+
+    /**
+     * Idempotent JSON producer factory used for all outbound domain events.
+     */
+    @Bean
+    public ProducerFactory<String, Object> producerFactory() {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+        props.put(ProducerConfig.ACKS_CONFIG, "all");
+        props.put(ProducerConfig.RETRIES_CONFIG, 3);
+        props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 1);
+        return new DefaultKafkaProducerFactory<>(props);
+    }
+
+    /**
+     * Kafka template bound to the JSON producer factory.
+     */
+    @Bean
+    public KafkaTemplate<String, Object> kafkaTemplate() {
+        return new KafkaTemplate<>(producerFactory());
+    }
+
+    /**
+     * Consumer factory configured to deserialise trusted event payloads from
+     * the underwriting event package.
+     */
+    @Bean
+    public ConsumerFactory<String, Object> consumerFactory() {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, consumerGroupId);
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+
+        JsonDeserializer<Object> valueDeserializer = new JsonDeserializer<>();
+        valueDeserializer.addTrustedPackages("com.aegisinsure.underwriting.event");
+        valueDeserializer.setUseTypeHeaders(true);
+
+        return new DefaultKafkaConsumerFactory<>(props, new StringDeserializer(), valueDeserializer);
+    }
+
+    /**
+     * Listener container factory with manual acknowledgement and bounded
+     * concurrency, used by every {@code @KafkaListener} in the service.
+     */
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerContainerFactory() {
+        ConcurrentKafkaListenerContainerFactory<String, Object> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory());
+        factory.setConcurrency(3);
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        return factory;
+    }
+}

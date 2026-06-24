@@ -1,0 +1,56 @@
+CHUNK_ID: C003
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f03 (com.aegisinsure.underwriting.config.SecurityConfig)
+LAYER: Config
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+
+/**
+ * Stateless HTTP security for the underwriting API. Actuator health and the
+ * application creation endpoint are open; all other endpoints require an
+ * authenticated principal via HTTP Basic. CSRF is disabled because the service
+ * exposes only token/credential-authenticated JSON APIs with no browser session.
+ */
+@Configuration
+public class SecurityConfig {
+
+    /**
+     * Defines the application security filter chain.
+     */
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+                .csrf(AbstractHttpConfigurer::disable)
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/applications").permitAll()
+                        .requestMatchers("/actuator/**").hasRole("OPS")
+                        .anyRequest().authenticated())
+                .httpBasic(Customizer.withDefaults());
+        return http.build();
+    }
+
+    /**
+     * BCrypt password encoder used for any locally-provisioned service accounts.
+     */
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder(12);
+    }
+}

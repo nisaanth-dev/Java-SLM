@@ -1,0 +1,104 @@
+CHUNK_ID: C042
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f42 (com.aegisinsure.underwriting.mapper.PolicyApplicationMapper)
+LAYER: Mapper
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.mapper;
+
+import com.aegisinsure.underwriting.dto.request.ApplicantRequest;
+import com.aegisinsure.underwriting.dto.request.CoverageSelectionRequest;
+import com.aegisinsure.underwriting.dto.request.VehicleRequest;
+import com.aegisinsure.underwriting.dto.response.PolicyApplicationResponse;
+import com.aegisinsure.underwriting.entity.Applicant;
+import com.aegisinsure.underwriting.entity.CoverageItem;
+import com.aegisinsure.underwriting.entity.PolicyApplication;
+import com.aegisinsure.underwriting.entity.Vehicle;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * MapStruct mapper translating inbound application request payloads into JPA
+ * entities, and assembling the application read model. Simple request-to-entity
+ * conversions are generated; the response assembly is implemented as a default
+ * method because it flattens the applicant name and projects nested collections.
+ */
+@Mapper(componentModel = "spring")
+public interface PolicyApplicationMapper {
+
+    /**
+     * Maps an applicant request into a new {@link Applicant} entity. Identity,
+     * audit, and back-reference fields are populated by the persistence layer.
+     */
+    @Mapping(target = "id", ignore = true)
+    @Mapping(target = "applications", ignore = true)
+    @Mapping(target = "createdAt", ignore = true)
+    @Mapping(target = "updatedAt", ignore = true)
+    Applicant toApplicant(ApplicantRequest request);
+
+    /**
+     * Maps a vehicle request into a new {@link Vehicle} entity.
+     */
+    @Mapping(target = "id", ignore = true)
+    @Mapping(target = "application", ignore = true)
+    @Mapping(target = "createdAt", ignore = true)
+    Vehicle toVehicle(VehicleRequest request);
+
+    /**
+     * Maps a coverage selection request into a new {@link CoverageItem}. The
+     * calculated premium is filled in later during rating.
+     */
+    @Mapping(target = "id", ignore = true)
+    @Mapping(target = "application", ignore = true)
+    @Mapping(target = "calculatedPremium", ignore = true)
+    @Mapping(target = "createdAt", ignore = true)
+    CoverageItem toCoverageItem(CoverageSelectionRequest request);
+
+    /**
+     * Assembles the application read model, flattening the applicant display
+     * name and projecting the vehicle and coverage collections into their
+     * nested view records.
+     */
+    default PolicyApplicationResponse toResponse(PolicyApplication entity) {
+        if (entity == null) {
+            return null;
+        }
+
+        String applicantName = entity.getApplicant() == null
+                ? null : entity.getApplicant().getFullName();
+
+        // Project each insured vehicle into its lightweight view record.
+        List<PolicyApplicationResponse.VehicleView> vehicleViews = new ArrayList<>();
+        if (entity.getVehicles() != null) {
+            for (Vehicle vehicle : entity.getVehicles()) {
+                vehicleViews.add(new PolicyApplicationResponse.VehicleView(
+                        vehicle.getId(), vehicle.getVin(), vehicle.getMake(), vehicle.getModel(),
+                        vehicle.getModelYear(), vehicle.getStatedValue(), vehicle.getAnnualMileage(),
+                        vehicle.getPrimaryUse(), vehicle.isAntiTheftDevice()));
+            }
+        }
+
+        // Project each coverage line, rendering the enum as its stable name.
+        List<PolicyApplicationResponse.CoverageView> coverageViews = new ArrayList<>();
+        if (entity.getCoverageItems() != null) {
+            for (CoverageItem item : entity.getCoverageItems()) {
+                String typeName = item.getCoverageType() == null ? null : item.getCoverageType().name();
+                coverageViews.add(new PolicyApplicationResponse.CoverageView(
+                        item.getId(), typeName, item.getCoverageLimit(),
+                        item.getDeductible(), item.getCalculatedPremium()));
+            }
+        }
+
+        return new PolicyApplicationResponse(
+                entity.getId(), entity.getApplicationReference(), entity.getStatus(),
+                applicantName, entity.getEffectiveDate(), entity.getCreditScore(),
+                entity.getFraudScore(), entity.getRiskScore(), entity.getRiskTier(),
+                entity.getDecisionReason(), vehicleViews, coverageViews,
+                entity.getSubmittedAt(), entity.getCreatedAt(), entity.getUpdatedAt());
+    }
+}

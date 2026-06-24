@@ -1,0 +1,36 @@
+CHUNK_ID: C058
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f58 (com.aegisinsure.underwriting.UnderwritingServiceApplication)
+LAYER: Util
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting;
+
+import com.aegisinsure.underwriting.config.UnderwritingProperties;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cloud.openfeign.EnableFeignClients;
+import org.springframework.scheduling.annotation.EnableScheduling;
+
+/**
+ * Boot entry point for the Aegis policy underwriting service. Enables Feign
+ * clients for the external credit-bureau and fraud-screening dependencies,
+ * scheduling for the stale-quote expiry sweep, and constructor binding of the
+ * {@link UnderwritingProperties} configuration tree.
+ */
+@SpringBootApplication
+@EnableFeignClients
+@EnableScheduling
+@EnableConfigurationProperties(UnderwritingProperties.class)
+public class UnderwritingServiceApplication {
+
+    /**
+     * Launches the Spring application context.
+     */
+    public static void main(String[] args) {
+        SpringApplication.run(UnderwritingServiceApplication.class, args);
+    }
+}

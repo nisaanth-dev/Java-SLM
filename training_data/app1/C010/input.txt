@@ -1,0 +1,41 @@
+CHUNK_ID: C010
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f10 (com.aegisinsure.underwriting.dto.request.PolicyApplicationRequest)
+LAYER: DTO
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.dto.request;
+
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+
+import java.time.LocalDate;
+import java.util.List;
+
+/**
+ * Top-level command payload for creating a new auto policy application. Bundles
+ * the applicant, the insured vehicles, the requested coverages, and the
+ * requested policy effective date. Nested payloads are cascade-validated via
+ * {@link Valid}.
+ */
+public record PolicyApplicationRequest(
+
+        @NotNull(message = "Applicant details are required")
+        @Valid
+        ApplicantRequest applicant,
+
+        @NotEmpty(message = "At least one vehicle is required")
+        @Valid
+        List<VehicleRequest> vehicles,
+
+        @NotEmpty(message = "At least one coverage selection is required")
+        @Valid
+        List<CoverageSelectionRequest> coverages,
+
+        @NotNull(message = "Requested effective date is required")
+        LocalDate effectiveDate
+) {
+}

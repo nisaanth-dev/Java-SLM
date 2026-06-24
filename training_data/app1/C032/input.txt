@@ -1,0 +1,62 @@
+CHUNK_ID: C032
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f32 (com.aegisinsure.underwriting.event.publisher.PolicyEventPublisher)
+LAYER: EventPublisher
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.event.publisher;
+
+import com.aegisinsure.underwriting.config.KafkaConfig;
+import com.aegisinsure.underwriting.entity.Policy;
+import com.aegisinsure.underwriting.event.DomainEvent;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Component;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Publishes policy lifecycle domain events to the underwriting policy lifecycle
+ * topic. Used by the policy issuance flow and the policy controller to broadcast
+ * issuance, activation, and cancellation events.
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class PolicyEventPublisher {
+
+    private final KafkaTemplate<String, Object> kafkaTemplate;
+
+    /**
+     * Publishes a policy lifecycle event keyed by policy number.
+     */
+    public void publishPolicyEvent(Policy policy, String eventType) {
+        if (policy == null || policy.getPolicyNumber() == null) {
+            log.warn("Skipping publish: policy or policy number is null");
+            return;
+        }
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("policyNumber", policy.getPolicyNumber());
+        payload.put("status", policy.getStatus() == null ? null : policy.getStatus().name());
+        payload.put("sourceQuoteReference", policy.getSourceQuoteReference());
+        payload.put("annualPremium", policy.getAnnualPremium());
+        payload.put("effectiveDate", policy.getEffectiveDate() == null
+                ? null : policy.getEffectiveDate().toString());
+
+        DomainEvent event = DomainEvent.of(
+                eventType, "Policy", policy.getPolicyNumber(), payload);
+
+        try {
+            kafkaTemplate.send(KafkaConfig.POLICY_LIFECYCLE_TOPIC, policy.getPolicyNumber(), event);
+            log.debug("Published {} for policy {}", eventType, policy.getPolicyNumber());
+        } catch (RuntimeException ex) {
+            log.error("Failed to publish {} for policy {}: {}",
+                    eventType, policy.getPolicyNumber(), ex.getMessage());
+        }
+    }
+}

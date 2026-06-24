@@ -1,0 +1,99 @@
+CHUNK_ID: C027
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f27 (com.aegisinsure.underwriting.entity.Vehicle)
+LAYER: Entity
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.entity;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+
+/**
+ * An insured vehicle attached to a {@link PolicyApplication}. Vehicle
+ * attributes (stated value, annual mileage, primary use, anti-theft equipment)
+ * are inputs to both the risk-scoring and premium-calculation engines.
+ */
+@Entity
+@Table(name = "vehicle")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Vehicle {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "application_id", nullable = false)
+    private PolicyApplication application;
+
+    @Column(name = "vin", nullable = false, length = 17)
+    private String vin;
+
+    @Column(name = "make", nullable = false, length = 50)
+    private String make;
+
+    @Column(name = "model", nullable = false, length = 50)
+    private String model;
+
+    @Column(name = "model_year", nullable = false)
+    private int modelYear;
+
+    @Column(name = "stated_value", nullable = false, precision = 12, scale = 2)
+    private BigDecimal statedValue;
+
+    @Column(name = "annual_mileage", nullable = false)
+    private int annualMileage;
+
+    /**
+     * Primary use category: one of {@code PERSONAL}, {@code COMMUTE}, or
+     * {@code COMMERCIAL}. Stored as a free-form code to avoid an additional
+     * enum table; the rating engine treats unknown values as {@code PERSONAL}.
+     */
+    @Column(name = "primary_use", nullable = false, length = 20)
+    private String primaryUse;
+
+    @Column(name = "anti_theft_device", nullable = false)
+    private boolean antiTheftDevice;
+
+    @Column(name = "garaged_zip", length = 10)
+    private String garagedZip;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
+    /**
+     * Returns true when the vehicle is rated for commercial use, which carries
+     * a heavier risk loading than personal or commute use.
+     */
+    public boolean isCommercialUse() {
+        return "COMMERCIAL".equalsIgnoreCase(primaryUse);
+    }
+
+    @PrePersist
+    void onCreate() {
+        this.createdAt = Instant.now();
+    }
+}

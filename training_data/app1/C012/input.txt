@@ -1,0 +1,29 @@
+CHUNK_ID: C012
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f12 (com.aegisinsure.underwriting.dto.response.CreditReportResult)
+LAYER: DTO
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.dto.response;
+
+/**
+ * Response payload returned by the external credit-bureau-service. Carries the
+ * pulled credit score plus the supporting flags the risk engine consumes when
+ * computing the composite risk score.
+ *
+ * @param creditScore     numeric credit score, typically 300-850
+ * @param bureauReferenceId opaque reference assigned by the bureau for audit
+ * @param thinFile        true when the file has insufficient trade-line history
+ * @param bankruptcyFlag  true when a bankruptcy event is on record
+ * @param tradeLineCount  number of trade lines contributing to the score
+ */
+public record CreditReportResult(
+        int creditScore,
+        String bureauReferenceId,
+        boolean thinFile,
+        boolean bankruptcyFlag,
+        int tradeLineCount
+) {
+}

@@ -1,0 +1,35 @@
+CHUNK_ID: C051
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f51 (com.aegisinsure.underwriting.service.FraudScreeningClient)
+LAYER: Service
+ENTRY_POINT: yes
+
+=== CODE ===
+package com.aegisinsure.underwriting.service;
+
+import com.aegisinsure.underwriting.dto.response.FraudScreeningResult;
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+
+/**
+ * Declarative HTTP client for the external fraud-detection-service. Screens an
+ * applicant against watchlists and identity-verification checks. The base URL
+ * is resolved from the {@code underwriting.external.fraud-detection-url}
+ * property.
+ */
+@FeignClient(name = "fraud-detection-service", url = "${underwriting.external.fraud-detection-url}")
+public interface FraudScreeningClient {
+
+    /**
+     * Screens an applicant for fraud risk.
+     *
+     * @param licenseNumber the applicant's driver license number
+     * @param lastName      the applicant's surname for identity matching
+     * @return the fraud screening result
+     */
+    @GetMapping("/api/v1/fraud-screenings")
+    FraudScreeningResult screenApplicant(@RequestParam("licenseNumber") String licenseNumber,
+                                         @RequestParam("lastName") String lastName);
+}

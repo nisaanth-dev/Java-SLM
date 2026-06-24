@@ -1,0 +1,63 @@
+CHUNK_ID: C011
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f11 (com.aegisinsure.underwriting.dto.request.VehicleRequest)
+LAYER: DTO
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.dto.request;
+
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
+
+import java.math.BigDecimal;
+
+/**
+ * Inbound payload describing a single vehicle to be insured under an
+ * application. Stated value and mileage drive both risk scoring and premium
+ * rating, so they carry strict numeric bounds.
+ */
+public record VehicleRequest(
+
+        @NotBlank(message = "VIN is required")
+        @Pattern(regexp = "[A-HJ-NPR-Z0-9]{17}", message = "VIN must be a valid 17-character VIN")
+        String vin,
+
+        @NotBlank(message = "Make is required")
+        @Size(max = 50, message = "Make must not exceed 50 characters")
+        String make,
+
+        @NotBlank(message = "Model is required")
+        @Size(max = 50, message = "Model must not exceed 50 characters")
+        String model,
+
+        @Min(value = 1980, message = "Model year must be 1980 or later")
+        @Max(value = 2030, message = "Model year must be 2030 or earlier")
+        int modelYear,
+
+        @NotNull(message = "Stated value is required")
+        @DecimalMin(value = "500.00", message = "Stated value must be at least 500.00")
+        BigDecimal statedValue,
+
+        @PositiveOrZero(message = "Annual mileage must not be negative")
+        @Max(value = 200000, message = "Annual mileage must not exceed 200000")
+        int annualMileage,
+
+        @NotBlank(message = "Primary use is required")
+        @Pattern(regexp = "PERSONAL|COMMUTE|COMMERCIAL",
+                message = "Primary use must be PERSONAL, COMMUTE, or COMMERCIAL")
+        String primaryUse,
+
+        boolean antiTheftDevice,
+
+        @Pattern(regexp = "\\d{5}(-\\d{4})?", message = "Garaged ZIP must be a valid US ZIP")
+        String garagedZip
+) {
+}

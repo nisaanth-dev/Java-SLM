@@ -1,0 +1,123 @@
+CHUNK_ID: C017
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f17 (com.aegisinsure.underwriting.entity.Applicant)
+LAYER: Entity
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.entity;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
+import jakarta.persistence.CascadeType;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Named insured / primary applicant on one or more auto policy applications.
+ * An applicant is a long-lived party record; a single applicant may submit
+ * several applications over time, modelled by the {@code applications}
+ * collection.
+ */
+@Entity
+@Table(name = "applicant")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Applicant {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "first_name", nullable = false, length = 80)
+    private String firstName;
+
+    @Column(name = "last_name", nullable = false, length = 80)
+    private String lastName;
+
+    @Column(name = "date_of_birth", nullable = false)
+    private LocalDate dateOfBirth;
+
+    @Column(name = "email", length = 160)
+    private String email;
+
+    @Column(name = "phone", length = 30)
+    private String phone;
+
+    @Column(name = "license_number", nullable = false, length = 40)
+    private String licenseNumber;
+
+    @Column(name = "license_state", nullable = false, length = 2)
+    private String licenseState;
+
+    @Column(name = "license_issue_date")
+    private LocalDate licenseIssueDate;
+
+    @Column(name = "marital_status", length = 20)
+    private String maritalStatus;
+
+    @Column(name = "residence_zip", length = 10)
+    private String residenceZip;
+
+    @OneToMany(mappedBy = "applicant", cascade = CascadeType.ALL, orphanRemoval = false)
+    @Builder.Default
+    private List<PolicyApplication> applications = new ArrayList<>();
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
+    /**
+     * Links an application to this applicant and maintains both sides of the
+     * bidirectional association.
+     */
+    public void addApplication(PolicyApplication application) {
+        if (application == null) {
+            return;
+        }
+        applications.add(application);
+        application.setApplicant(this);
+    }
+
+    /**
+     * Convenience accessor returning the applicant's full display name.
+     */
+    public String getFullName() {
+        String first = firstName == null ? "" : firstName.trim();
+        String last = lastName == null ? "" : lastName.trim();
+        return (first + " " + last).trim();
+    }
+
+    @PrePersist
+    void onCreate() {
+        Instant now = Instant.now();
+        this.createdAt = now;
+        this.updatedAt = now;
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        this.updatedAt = Instant.now();
+    }
+}

@@ -1,0 +1,59 @@
+CHUNK_ID: C007
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f07 (com.aegisinsure.underwriting.controller.UnderwritingController)
+LAYER: Controller
+ENTRY_POINT: yes
+
+=== CODE ===
+package com.aegisinsure.underwriting.controller;
+
+import com.aegisinsure.underwriting.dto.response.PolicyApplicationResponse;
+import com.aegisinsure.underwriting.service.UnderwritingService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * REST API for underwriting decisions on submitted applications. Exposes the
+ * automated decision endpoint (which scores and dispositions an application) and
+ * a manual-decision endpoint for underwriter overrides on referred files.
+ */
+@RestController
+@RequestMapping("/api/v1/underwriting")
+@RequiredArgsConstructor
+public class UnderwritingController {
+
+    private final UnderwritingService underwritingService;
+
+    /**
+     * Runs the automated underwriting decision for a submitted application:
+     * scores it, applies the decision thresholds, and records the outcome.
+     */
+    @PostMapping("/{applicationReference}/decision")
+    public ResponseEntity<PolicyApplicationResponse> decide(
+            @PathVariable String applicationReference) {
+        return ResponseEntity.ok(underwritingService.underwrite(applicationReference));
+    }
+
+    /**
+     * Records a manual underwriter decision (APPROVED or DECLINED) on an
+     * application in review or referred status, with optional notes and the
+     * deciding underwriter's identity.
+     */
+    @PostMapping("/{applicationReference}/manual-decision")
+    public ResponseEntity<PolicyApplicationResponse> manualDecision(
+            @PathVariable String applicationReference,
+            @RequestParam String outcome,
+            @RequestParam(required = false) String notes,
+            @RequestParam(required = false) String decisionedBy) {
+
+        PolicyApplicationResponse response = underwritingService.recordManualDecision(
+                applicationReference, outcome, notes, decisionedBy);
+        return ResponseEntity.ok(response);
+    }
+}

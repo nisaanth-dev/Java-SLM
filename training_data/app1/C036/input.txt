@@ -1,0 +1,38 @@
+CHUNK_ID: C036
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f36 (com.aegisinsure.underwriting.exception.ExternalServiceException)
+LAYER: ExceptionHandler
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.exception;
+
+/**
+ * Thrown when a downstream dependency invoked over Feign (the credit bureau or
+ * the fraud-screening service) fails or returns an unusable response. Mapped to
+ * HTTP 502 Bad Gateway by the global handler so callers can distinguish an
+ * upstream fault from a client error.
+ */
+public class ExternalServiceException extends RuntimeException {
+
+    private final String serviceName;
+
+    public ExternalServiceException(String serviceName, String message, Throwable cause) {
+        super(message, cause);
+        this.serviceName = serviceName;
+    }
+
+    public ExternalServiceException(String serviceName, String message) {
+        super(message);
+        this.serviceName = serviceName;
+    }
+
+    /**
+     * The logical name of the failed downstream service, surfaced in the error
+     * response for operational triage.
+     */
+    public String getServiceName() {
+        return serviceName;
+    }
+}

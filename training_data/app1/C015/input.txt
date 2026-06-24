@@ -1,0 +1,48 @@
+CHUNK_ID: C015
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f15 (com.aegisinsure.underwriting.dto.response.PolicyResponse)
+LAYER: DTO
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.dto.response;
+
+import com.aegisinsure.underwriting.entity.PolicyStatus;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.util.List;
+
+/**
+ * Read model returned for an issued policy. Exposes the policy term, the bound
+ * premium, and the full installment schedule via the nested
+ * {@link InstallmentView}.
+ */
+public record PolicyResponse(
+        Long id,
+        String policyNumber,
+        String applicationReference,
+        String sourceQuoteReference,
+        PolicyStatus status,
+        LocalDate effectiveDate,
+        LocalDate expirationDate,
+        BigDecimal annualPremium,
+        BigDecimal totalPayable,
+        int installmentCount,
+        BigDecimal installmentAmount,
+        Instant issuedAt,
+        List<InstallmentView> installments
+) {
+
+    /**
+     * Nested view of a single scheduled premium installment.
+     */
+    public record InstallmentView(
+            int sequence,
+            LocalDate dueDate,
+            BigDecimal amount
+    ) {
+    }
+}

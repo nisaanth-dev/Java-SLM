@@ -1,0 +1,75 @@
+CHUNK_ID: C018
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f18 (com.aegisinsure.underwriting.entity.ApplicationStatus)
+LAYER: Entity
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.entity;
+
+import java.util.EnumSet;
+import java.util.Set;
+
+/**
+ * Lifecycle states for a personal-auto policy application as it moves through
+ * intake, underwriting review, and final disposition.
+ *
+ * <p>The {@link #canTransitionTo(ApplicationStatus)} method encodes the legal
+ * state machine. Any attempt to move an application along an undefined edge is
+ * rejected by the service layer with an {@code InvalidStateTransitionException}.
+ */
+public enum ApplicationStatus {
+
+    DRAFT,
+    SUBMITTED,
+    UNDER_REVIEW,
+    REFERRED,
+    APPROVED,
+    DECLINED,
+    BOUND,
+    EXPIRED,
+    WITHDRAWN;
+
+    /**
+     * Returns the set of states this application may legally move into next.
+     * Terminal states return an empty set.
+     */
+    public Set<ApplicationStatus> allowedNextStates() {
+        return switch (this) {
+            case DRAFT -> EnumSet.of(SUBMITTED, WITHDRAWN);
+            case SUBMITTED -> EnumSet.of(UNDER_REVIEW, WITHDRAWN);
+            case UNDER_REVIEW -> EnumSet.of(REFERRED, APPROVED, DECLINED);
+            case REFERRED -> EnumSet.of(APPROVED, DECLINED);
+            case APPROVED -> EnumSet.of(BOUND, EXPIRED);
+            case DECLINED, BOUND, EXPIRED, WITHDRAWN -> EnumSet.noneOf(ApplicationStatus.class);
+        };
+    }
+
+    /**
+     * Tests whether a transition from this state to {@code target} is permitted
+     * by the application state machine.
+     */
+    public boolean canTransitionTo(ApplicationStatus target) {
+        if (target == null) {
+            return false;
+        }
+        return allowedNextStates().contains(target);
+    }
+
+    /**
+     * A terminal state has no outbound transitions and represents a final
+     * disposition of the application.
+     */
+    public boolean isTerminal() {
+        return allowedNextStates().isEmpty();
+    }
+
+    /**
+     * Indicates whether the application has reached a state in which a binding
+     * underwriting decision has been recorded.
+     */
+    public boolean isDecisioned() {
+        return this == APPROVED || this == DECLINED || this == REFERRED;
+    }
+}

@@ -1,0 +1,35 @@
+CHUNK_ID: C034
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f34 (com.aegisinsure.underwriting.event.VehicleInspectionEvent)
+LAYER: EventPublisher
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.event;
+
+import java.time.Instant;
+
+/**
+ * Inbound event consumed from the inspection service when a vehicle inspection
+ * completes. A failed inspection on an application still under review forces the
+ * application into a referred state for manual underwriting.
+ *
+ * @param inspectionId         the inspection system identifier
+ * @param applicationReference the application whose vehicle was inspected
+ * @param vin                  the inspected vehicle VIN
+ * @param passed               whether the vehicle passed inspection
+ * @param inspectorNotes       free-text inspector commentary
+ * @param conditionScore       0-100 condition score assigned by the inspector
+ * @param completedAt          the instant the inspection completed
+ */
+public record VehicleInspectionEvent(
+        String inspectionId,
+        String applicationReference,
+        String vin,
+        boolean passed,
+        String inspectorNotes,
+        int conditionScore,
+        Instant completedAt
+) {
+}

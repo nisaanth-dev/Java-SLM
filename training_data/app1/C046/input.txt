@@ -1,0 +1,56 @@
+CHUNK_ID: C046
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f46 (com.aegisinsure.underwriting.repository.PolicyApplicationRepository)
+LAYER: Repository
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.repository;
+
+import com.aegisinsure.underwriting.entity.ApplicationStatus;
+import com.aegisinsure.underwriting.entity.PolicyApplication;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Data-access repository for the {@link PolicyApplication} aggregate root.
+ */
+@Repository
+public interface PolicyApplicationRepository extends JpaRepository<PolicyApplication, Long> {
+
+    /**
+     * Locates an application by its external business reference.
+     */
+    Optional<PolicyApplication> findByApplicationReference(String applicationReference);
+
+    /**
+     * Returns all applications currently in the supplied status.
+     */
+    List<PolicyApplication> findByStatus(ApplicationStatus status);
+
+    /**
+     * Returns all applications submitted by a given applicant.
+     */
+    List<PolicyApplication> findByApplicantId(Long applicantId);
+
+    /**
+     * Counts applications in a particular status, used for operational metrics.
+     */
+    long countByStatus(ApplicationStatus status);
+
+    /**
+     * Finds submitted applications that have been awaiting review since before
+     * the supplied cutoff, ordered oldest-first for the work queue.
+     */
+    @Query("select pa from PolicyApplication pa where pa.status = :status "
+            + "and pa.submittedAt < :cutoff order by pa.submittedAt asc")
+    List<PolicyApplication> findStaleByStatus(@Param("status") ApplicationStatus status,
+                                              @Param("cutoff") Instant cutoff);
+}

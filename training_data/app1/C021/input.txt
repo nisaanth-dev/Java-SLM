@@ -1,0 +1,144 @@
+CHUNK_ID: C021
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f21 (com.aegisinsure.underwriting.entity.Policy)
+LAYER: Entity
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.entity;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+
+/**
+ * An issued auto policy bound from an accepted {@link Quote}. Holds the policy
+ * term, the bound premium and installment plan, and the policy lifecycle
+ * status. The originating quote is referenced by its business key so the bind
+ * provenance is preserved without a hard foreign key to the quote row.
+ */
+@Entity
+@Table(name = "policy")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Policy {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "policy_number", nullable = false, unique = true, length = 40)
+    private String policyNumber;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "application_id", nullable = false)
+    private PolicyApplication application;
+
+    @Column(name = "source_quote_reference", nullable = false, length = 40)
+    private String sourceQuoteReference;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private PolicyStatus status;
+
+    @Column(name = "effective_date", nullable = false)
+    private LocalDate effectiveDate;
+
+    @Column(name = "expiration_date", nullable = false)
+    private LocalDate expirationDate;
+
+    @Column(name = "annual_premium", nullable = false, precision = 12, scale = 2)
+    private BigDecimal annualPremium;
+
+    @Column(name = "total_payable", nullable = false, precision = 12, scale = 2)
+    private BigDecimal totalPayable;
+
+    @Column(name = "installment_count", nullable = false)
+    private int installmentCount;
+
+    @Column(name = "installment_amount", precision = 12, scale = 2)
+    private BigDecimal installmentAmount;
+
+    @Column(name = "issued_at")
+    private Instant issuedAt;
+
+    @Column(name = "cancelled_at")
+    private Instant cancelledAt;
+
+    @Column(name = "cancellation_reason", length = 300)
+    private String cancellationReason;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
+    /**
+     * Applies a validated policy status transition enforced by the
+     * {@link PolicyStatus} state machine.
+     */
+    public void transitionTo(PolicyStatus target) {
+        if (this.status != null && !this.status.canTransitionTo(target)) {
+            throw new IllegalStateException(
+                    "Illegal policy status transition: " + this.status + " -> " + target);
+        }
+        this.status = target;
+    }
+
+    /**
+     * Cancels the policy, recording the timestamp and the supplied reason.
+     */
+    public void cancel(String reason) {
+        transitionTo(PolicyStatus.CANCELLED);
+        this.cancelledAt = Instant.now();
+        this.cancellationReason = reason;
+    }
+
+    /**
+     * Returns true when the policy term has ended relative to the supplied
+     * business date.
+     */
+    public boolean isExpiredAsOf(LocalDate businessDate) {
+        return expirationDate != null && businessDate != null
+                && businessDate.isAfter(expirationDate);
+    }
+
+    @PrePersist
+    void onCreate() {
+        Instant now = Instant.now();
+        this.createdAt = now;
+        this.updatedAt = now;
+        if (this.status == null) {
+            this.status = PolicyStatus.PENDING;
+        }
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        this.updatedAt = Instant.now();
+    }
+}

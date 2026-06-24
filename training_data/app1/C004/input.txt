@@ -1,0 +1,55 @@
+CHUNK_ID: C004
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f04 (com.aegisinsure.underwriting.config.UnderwritingProperties)
+LAYER: Config
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+import java.math.BigDecimal;
+
+/**
+ * Strongly-typed binding of the {@code underwriting.*} configuration tree.
+ * Grouped into cohesive sub-records for quote validity, risk thresholds,
+ * premium loadings, and external service endpoints. Bound via constructor
+ * binding (Spring Boot 3) and activated by {@code @EnableConfigurationProperties}
+ * on the application class.
+ */
+@ConfigurationProperties(prefix = "underwriting")
+public record UnderwritingProperties(
+        Quote quote,
+        Risk risk,
+        Premium premium,
+        External external
+) {
+
+    /**
+     * Quote lifecycle tuning: how long a quote stays valid and how many stale
+     * quotes the expiry batch processes per run.
+     */
+    public record Quote(int validityDays, int expiryBatchSize) {
+    }
+
+    /**
+     * Risk-decisioning thresholds applied against the composite risk score.
+     */
+    public record Risk(int autoDeclineThreshold, int manualReferralThreshold, int thinFileSurcharge) {
+    }
+
+    /**
+     * Premium loadings applied during rating: the flat policy fee, the premium
+     * tax rate, and the surcharge applied when paying by installments.
+     */
+    public record Premium(BigDecimal policyFee, BigDecimal taxRate, BigDecimal installmentSurchargeRate) {
+    }
+
+    /**
+     * Base URLs for the downstream Feign dependencies.
+     */
+    public record External(String creditBureauUrl, String fraudDetectionUrl) {
+    }
+}

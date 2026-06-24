@@ -1,0 +1,127 @@
+CHUNK_ID: C024
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f24 (com.aegisinsure.underwriting.entity.Quote)
+LAYER: Entity
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.entity;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+
+/**
+ * A premium quote generated from an approved application. Captures the rated
+ * annual premium, fees, taxes, the total payable, and the installment plan.
+ * A quote has a bounded validity window and expires if not accepted before
+ * {@code expiresAt}.
+ */
+@Entity
+@Table(name = "quote")
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class Quote {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "quote_reference", nullable = false, unique = true, length = 40)
+    private String quoteReference;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "application_id", nullable = false)
+    private PolicyApplication application;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private QuoteStatus status;
+
+    @Column(name = "annual_premium", nullable = false, precision = 12, scale = 2)
+    private BigDecimal annualPremium;
+
+    @Column(name = "fees", precision = 10, scale = 2)
+    private BigDecimal fees;
+
+    @Column(name = "taxes", precision = 10, scale = 2)
+    private BigDecimal taxes;
+
+    @Column(name = "total_payable", nullable = false, precision = 12, scale = 2)
+    private BigDecimal totalPayable;
+
+    @Column(name = "installment_count", nullable = false)
+    private int installmentCount;
+
+    @Column(name = "installment_amount", precision = 12, scale = 2)
+    private BigDecimal installmentAmount;
+
+    @Column(name = "issued_at")
+    private Instant issuedAt;
+
+    @Column(name = "expires_at")
+    private Instant expiresAt;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private Instant createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
+    /**
+     * Applies a validated quote status transition. Legality is enforced via the
+     * {@link QuoteStatus} state machine.
+     */
+    public void transitionTo(QuoteStatus target) {
+        if (this.status != null && !this.status.canTransitionTo(target)) {
+            throw new IllegalStateException(
+                    "Illegal quote status transition: " + this.status + " -> " + target);
+        }
+        this.status = target;
+    }
+
+    /**
+     * Returns true when the quote has passed its validity window relative to
+     * the supplied reference instant.
+     */
+    public boolean isExpiredAsOf(Instant reference) {
+        return expiresAt != null && reference != null && reference.isAfter(expiresAt);
+    }
+
+    @PrePersist
+    void onCreate() {
+        Instant now = Instant.now();
+        this.createdAt = now;
+        this.updatedAt = now;
+        if (this.status == null) {
+            this.status = QuoteStatus.DRAFT;
+        }
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        this.updatedAt = Instant.now();
+    }
+}

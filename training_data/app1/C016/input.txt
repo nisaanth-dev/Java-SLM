@@ -1,0 +1,46 @@
+CHUNK_ID: C016
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f16 (com.aegisinsure.underwriting.dto.response.QuoteResponse)
+LAYER: DTO
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.dto.response;
+
+import com.aegisinsure.underwriting.entity.QuoteStatus;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
+
+/**
+ * Read model returned for a premium quote. Exposes the rated premium, the
+ * fee/tax breakdown, the installment plan, and a per-coverage premium
+ * breakdown via the nested {@link PremiumLineView}.
+ */
+public record QuoteResponse(
+        Long id,
+        String quoteReference,
+        String applicationReference,
+        QuoteStatus status,
+        BigDecimal annualPremium,
+        BigDecimal fees,
+        BigDecimal taxes,
+        BigDecimal totalPayable,
+        int installmentCount,
+        BigDecimal installmentAmount,
+        Instant issuedAt,
+        Instant expiresAt,
+        List<PremiumLineView> premiumLines
+) {
+
+    /**
+     * Nested per-coverage premium breakdown line.
+     */
+    public record PremiumLineView(
+            String coverageType,
+            BigDecimal calculatedPremium
+    ) {
+    }
+}

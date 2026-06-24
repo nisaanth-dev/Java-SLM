@@ -1,0 +1,50 @@
+CHUNK_ID: C028
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f28 (com.aegisinsure.underwriting.event.DomainEvent)
+LAYER: EventPublisher
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.event;
+
+import java.time.Instant;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * Generic domain-event envelope published to the lifecycle topics. A single
+ * envelope shape carries every outbound event so downstream consumers can route
+ * on {@code eventType} and {@code aggregateType} without a bespoke schema per
+ * event. The {@code payload} map holds event-specific attributes.
+ *
+ * @param eventId            globally-unique event identifier
+ * @param eventType          domain event name, e.g. APPLICATION_APPROVED
+ * @param aggregateType      the originating aggregate, e.g. PolicyApplication
+ * @param aggregateReference the business key of the aggregate instance
+ * @param occurredAt         the instant the event was raised
+ * @param payload            event-specific attributes
+ */
+public record DomainEvent(
+        String eventId,
+        String eventType,
+        String aggregateType,
+        String aggregateReference,
+        Instant occurredAt,
+        Map<String, Object> payload
+) {
+
+    /**
+     * Builds a domain event, assigning a fresh identifier and timestamp.
+     */
+    public static DomainEvent of(String eventType, String aggregateType,
+                                 String aggregateReference, Map<String, Object> payload) {
+        return new DomainEvent(
+                UUID.randomUUID().toString(),
+                eventType,
+                aggregateType,
+                aggregateReference,
+                Instant.now(),
+                payload == null ? Map.of() : Map.copyOf(payload));
+    }
+}

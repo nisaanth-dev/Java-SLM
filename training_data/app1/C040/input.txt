@@ -1,0 +1,28 @@
+CHUNK_ID: C040
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f40 (com.aegisinsure.underwriting.exception.QuoteNotFoundException)
+LAYER: ExceptionHandler
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.exception;
+
+/**
+ * Thrown when a quote cannot be located by its identifier or business
+ * reference. Mapped to HTTP 404 by the global exception handler.
+ */
+public class QuoteNotFoundException extends RuntimeException {
+
+    public QuoteNotFoundException(String message) {
+        super(message);
+    }
+
+    public static QuoteNotFoundException forId(Long id) {
+        return new QuoteNotFoundException("Quote not found for id " + id);
+    }
+
+    public static QuoteNotFoundException forReference(String reference) {
+        return new QuoteNotFoundException("Quote not found for reference " + reference);
+    }
+}

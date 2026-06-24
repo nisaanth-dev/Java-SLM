@@ -1,0 +1,68 @@
+CHUNK_ID: C006
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f06 (com.aegisinsure.underwriting.controller.PolicyController)
+LAYER: Controller
+ENTRY_POINT: yes
+
+=== CODE ===
+package com.aegisinsure.underwriting.controller;
+
+import com.aegisinsure.underwriting.dto.response.PolicyResponse;
+import com.aegisinsure.underwriting.service.PolicyIssuanceService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.UriComponentsBuilder;
+
+import java.net.URI;
+
+/**
+ * REST API for issued auto policies. Supports binding a policy from an accepted
+ * quote, retrieving a policy with its installment schedule, and cancelling an
+ * in-force policy.
+ */
+@RestController
+@RequestMapping("/api/v1/policies")
+@RequiredArgsConstructor
+public class PolicyController {
+
+    private final PolicyIssuanceService policyIssuanceService;
+
+    /**
+     * Binds a policy from an accepted quote. Returns 201 with a Location header
+     * for the new policy.
+     */
+    @PostMapping
+    public ResponseEntity<PolicyResponse> issue(@RequestParam String quoteReference,
+                                                UriComponentsBuilder uriBuilder) {
+        PolicyResponse policy = policyIssuanceService.issuePolicy(quoteReference);
+        URI location = uriBuilder.path("/api/v1/policies/{policyNumber}")
+                .buildAndExpand(policy.policyNumber())
+                .toUri();
+        return ResponseEntity.created(location).body(policy);
+    }
+
+    /**
+     * Retrieves a policy by its policy number, including the dated installment
+     * schedule.
+     */
+    @GetMapping("/{policyNumber}")
+    public ResponseEntity<PolicyResponse> getByPolicyNumber(@PathVariable String policyNumber) {
+        return ResponseEntity.ok(policyIssuanceService.getByPolicyNumber(policyNumber));
+    }
+
+    /**
+     * Cancels an in-force policy, recording the supplied reason.
+     */
+    @PostMapping("/{policyNumber}/cancellation")
+    public ResponseEntity<PolicyResponse> cancel(@PathVariable String policyNumber,
+                                                 @RequestParam String reason) {
+        return ResponseEntity.ok(policyIssuanceService.cancelPolicy(policyNumber, reason));
+    }
+}

@@ -1,0 +1,50 @@
+CHUNK_ID: C048
+APPLICATION: Aegis Policy Administration Platform
+SERVICE: policy-underwriting-service
+FILE: f48 (com.aegisinsure.underwriting.repository.QuoteRepository)
+LAYER: Repository
+ENTRY_POINT: no
+
+=== CODE ===
+package com.aegisinsure.underwriting.repository;
+
+import com.aegisinsure.underwriting.entity.Quote;
+import com.aegisinsure.underwriting.entity.QuoteStatus;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Data-access repository for {@link Quote} entities.
+ */
+@Repository
+public interface QuoteRepository extends JpaRepository<Quote, Long> {
+
+    /**
+     * Locates a quote by its external business reference.
+     */
+    Optional<Quote> findByQuoteReference(String quoteReference);
+
+    /**
+     * Returns all quotes generated for a given application, newest first.
+     */
+    List<Quote> findByApplicationIdOrderByCreatedAtDesc(Long applicationId);
+
+    /**
+     * Returns quotes in the supplied status, used by the expiry scheduler.
+     */
+    List<Quote> findByStatus(QuoteStatus status);
+
+    /**
+     * Finds issued quotes whose validity window has elapsed as of the supplied
+     * reference instant. Drives the stale-quote expiry batch.
+     */
+    @Query("select q from Quote q where q.status = :status and q.expiresAt < :reference")
+    List<Quote> findExpirable(@Param("status") QuoteStatus status,
+                              @Param("reference") Instant reference);
+}
